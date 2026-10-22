@@ -161,7 +161,8 @@ Main
 `--map <directory>` and `--world <directory>` bypass this lifecycle entirely. Both
 branch before any window or device is created; `--map` prints configuration
 metadata, `--world` parses tile placements and prints the world summary. Neither
-path makes an SDL call or needs an OMSI asset.
+path makes an SDL call or needs an OMSI asset. `--map <directory> --render` parses
+first, then enters the lifecycle above with a different presenter.
 
 Failure mapping in `Program`:
 
@@ -239,6 +240,49 @@ Rules that keep the boundary intact:
 
 Not in this layer: tile contents, terrain heights, Chrono overlays, rendering, and
 any Nymeria scene construction. Those need a separately approved scope.
+
+## Diagnostic render mode
+
+The render mode added by Task 04 lives in `src/Nymeria.OMSI/Rendering/`. It turns
+parser output into a visible picture without adding a renderer, a shader family, or
+a second graphics framework. Its contract is
+[docs/OMSI_RENDERING.md](OMSI_RENDERING.md); this section records the boundary.
+
+```text
+OmsiWorldModel ──► OmsiMapPlan            pure: tile squares, placement points
+                        │
+             MapPlanView│centre, metres per pixel, clamping
+                        ▼
+          MapPlanRasterizer ──► MapPlanImage      pure CPU RGBA8 image
+                        │
+                        ▼
+   DiagnosticMapPresenter: GpuDevice.CreateTexture + SDL blit into the swapchain
+```
+
+Rules that keep the boundary intact:
+
+- **Parser output only.** The plan draws tile squares and placement markers. No
+  terrain, mesh, texture, curve, light, or object orientation is invented, and a
+  marker exists only where the parser read a record.
+- **Explicit coordinates.** Tile origin = column/row x tile edge, placement = that
+  origin plus the record's own x and y. The documented 300 m edge is used for metre
+  maps; the reference-measured 371.9 m edge is used for `[worldcoordinates]` maps and
+  reported as unverified. Compass orientation is not asserted.
+- **No shader work.** The frame is one uploaded texture blitted by SDL's own blit
+  command, which carries SDL's internal pipeline. Nothing is copied from the
+  engine's `examples/` tree, no DXIL is generated, and no DirectX Shader Compiler
+  provisioning is added.
+- **The host owns presentation, the presenter owns its texture.**
+  `IFramePresenter` is a two-implementation seam inside `OmsiHost` — cleared frames
+  and the diagnostic plan — not an abstraction over passes or resources.
+- **Honest labelling.** The window title, the first line of the console summary, and
+  this document all call the view diagnostic. It is never described as rendering the
+  map.
+
+Not in this mode, and not approved: terrain meshes, object or spline geometry,
+asset loading, reference resolution, lighting, and any scene graph. Real OMSI
+geometry needs an approved engine-level shader family (or a reviewed shader build
+step here), plus mesh decoding and an asset loader — separate tasks.
 
 ## OMSI tile and world data layer
 
