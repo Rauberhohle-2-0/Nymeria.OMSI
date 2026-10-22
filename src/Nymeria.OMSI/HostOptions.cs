@@ -25,20 +25,29 @@ internal sealed class HostOptions
     /// input.
     /// </summary>
     public const string UsageText =
-        "Usage: Nymeria.OMSI [-h|--help] [--smoke] [--map <directory>]\n" +
+        "Usage: Nymeria.OMSI [-h|--help] [--smoke] [--map <directory>] " +
+        "[--world <directory>]\n" +
         "  Opens a native window, initializes the Nymeria GPU device, presents\n" +
         "  cleared frames, and shuts down cleanly. It loads no OMSI content.\n" +
         "  --smoke            Present a fixed number of frames, then exit without input.\n" +
         "  --map <directory>  Inspect an OMSI map folder (the one containing\n" +
         "                     global.cfg): print its metadata, tile inventory, and\n" +
         "                     diagnostics. No window or GPU device is created.\n" +
+        "  --world <directory>  Parse the same map folder's tile files and print a\n" +
+        "                     bounded summary of object and spline placements. It\n" +
+        "                     renders nothing and creates no window or GPU device.\n" +
         "  -h, --help         Show this help and exit.";
 
-    private HostOptions(bool showHelp, int? maximumFrames, string? mapDirectory)
+    private HostOptions(
+        bool showHelp,
+        int? maximumFrames,
+        string? mapDirectory,
+        string? worldDirectory)
     {
         ShowHelp = showHelp;
         MaximumFrames = maximumFrames;
         MapDirectory = mapDirectory;
+        WorldDirectory = worldDirectory;
     }
 
     /// <summary>
@@ -59,6 +68,12 @@ internal sealed class HostOptions
     public string? MapDirectory { get; }
 
     /// <summary>
+    /// Gets the explicit OMSI map folder whose tile files should be parsed, or
+    /// <see langword="null"/> when no world inspection was requested.
+    /// </summary>
+    public string? WorldDirectory { get; }
+
+    /// <summary>
     /// Parses command-line arguments.
     /// </summary>
     /// <param name="arguments">The arguments passed to the process.</param>
@@ -75,6 +90,7 @@ internal sealed class HostOptions
         bool showHelp = false;
         bool isSmokeRun = false;
         string? mapDirectory = null;
+        string? worldDirectory = null;
 
         for (int index = 0; index < arguments.Count; index++)
         {
@@ -122,6 +138,38 @@ internal sealed class HostOptions
                     mapDirectory = value;
                     break;
 
+                case "--world":
+                    if (index + 1 >= arguments.Count)
+                    {
+                        return Fail(
+                            "--world requires a map directory path.",
+                            out options,
+                            out error);
+                    }
+
+                    string worldValue = arguments[++index];
+
+                    if (worldValue.Length == 0 || worldValue[0] == '-')
+                    {
+                        return Fail(
+                            "--world requires a map directory path, but got " +
+                            $"'{worldValue}'. A path that starts with '-' is not " +
+                            "accepted.",
+                            out options,
+                            out error);
+                    }
+
+                    if (worldDirectory is not null)
+                    {
+                        return Fail(
+                            "--world was given more than once.",
+                            out options,
+                            out error);
+                    }
+
+                    worldDirectory = worldValue;
+                    break;
+
                 default:
                     return Fail(
                         $"Unknown argument: {argument}",
@@ -139,10 +187,30 @@ internal sealed class HostOptions
                 out error);
         }
 
+        if (isSmokeRun && worldDirectory is not null)
+        {
+            return Fail(
+                "--smoke and --world cannot be combined: --world parses tile data " +
+                "only, without presenting frames.",
+                out options,
+                out error);
+        }
+
+        if (mapDirectory is not null && worldDirectory is not null)
+        {
+            return Fail(
+                "--map and --world cannot be combined: --map reports discovery " +
+                "metadata only, while --world parses tile placements and includes " +
+                "that metadata in its summary.",
+                out options,
+                out error);
+        }
+
         options = new HostOptions(
             showHelp,
             isSmokeRun ? SmokeFrameCount : null,
-            mapDirectory);
+            mapDirectory,
+            worldDirectory);
         error = null;
         return true;
     }
@@ -152,7 +220,7 @@ internal sealed class HostOptions
         out HostOptions options,
         out string? error)
     {
-        options = new HostOptions(false, null, null);
+        options = new HostOptions(false, null, null, null);
         error = message;
         return false;
     }

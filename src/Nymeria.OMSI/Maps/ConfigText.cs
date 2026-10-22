@@ -75,6 +75,15 @@ internal static class ConfigTextReader
     /// <summary>The largest number of physical lines this reader accepts.</summary>
     internal const int MaxLineCount = 200_000;
 
+    /// <summary>
+    /// The largest tile file this reader accepts. Tile files hold many placement
+    /// records, so they are allowed to be larger than the map configuration.
+    /// </summary>
+    internal const int MaxTileFileBytes = 64 * 1024 * 1024;
+
+    /// <summary>The largest number of physical lines accepted from a tile file.</summary>
+    internal const int MaxTileLineCount = 1_000_000;
+
     private static readonly UTF8Encoding s_strictUtf8 = new(
         encoderShouldEmitUTF8Identifier: false,
         throwOnInvalidBytes: true);
@@ -88,8 +97,13 @@ internal static class ConfigTextReader
     /// Reads and decodes one configuration file.
     /// </summary>
     /// <param name="path">The full path of the file.</param>
+    /// <param name="maxFileBytes">The byte limit for this file kind.</param>
+    /// <param name="maxLineCount">The line limit for this file kind.</param>
     /// <returns>The decoded text, warnings, and a fatal error when reading failed.</returns>
-    internal static ConfigReadResult Read(string path)
+    internal static ConfigReadResult Read(
+        string path,
+        int maxFileBytes = MaxFileBytes,
+        int maxLineCount = MaxLineCount)
     {
         byte[] bytes;
 
@@ -101,12 +115,12 @@ internal static class ConfigTextReader
                 FileAccess.Read,
                 FileShare.ReadWrite);
 
-            if (stream.Length > MaxFileBytes)
+            if (stream.Length > maxFileBytes)
             {
                 return Failure(
                     path,
                     $"The file is {stream.Length} bytes, which exceeds the " +
-                    $"{MaxFileBytes}-byte configuration limit.");
+                    $"{maxFileBytes}-byte limit for this file kind.");
             }
 
             bytes = new byte[stream.Length];
@@ -144,12 +158,12 @@ internal static class ConfigTextReader
                 path));
         }
 
-        if (!TrySplitLines(text, out List<ConfigLine> lines))
+        if (!TrySplitLines(text, maxLineCount, out List<ConfigLine> lines))
         {
             return Failure(
                 path,
-                $"The file has more than {MaxLineCount} lines, which exceeds the " +
-                "configuration limit.");
+                $"The file has more than {maxLineCount} lines, which exceeds the " +
+                "limit for this file kind.");
         }
 
         return new ConfigReadResult(
@@ -157,7 +171,10 @@ internal static class ConfigTextReader
             diagnostics,
             FatalError: null);
 
-        static bool TrySplitLines(string content, out List<ConfigLine> result)
+        static bool TrySplitLines(
+            string content,
+            int lineLimit,
+            out List<ConfigLine> result)
         {
             var parsed = new List<ConfigLine>();
             int number = 1;
@@ -184,7 +201,7 @@ internal static class ConfigTextReader
                 start = index + 1;
                 number++;
 
-                if (parsed.Count > MaxLineCount)
+                if (parsed.Count > lineLimit)
                 {
                     result = [];
                     return false;
@@ -196,7 +213,7 @@ internal static class ConfigTextReader
             {
                 parsed.Add(new ConfigLine(number, content[start..]));
 
-                if (parsed.Count > MaxLineCount)
+                if (parsed.Count > lineLimit)
                 {
                     result = [];
                     return false;
