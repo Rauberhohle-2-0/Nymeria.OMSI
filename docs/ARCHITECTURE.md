@@ -158,9 +158,10 @@ Main
  └─ exit code 0
 ```
 
-`--map <directory>` bypasses this lifecycle entirely. It branches before any
-window or device is created, reads configuration metadata, prints the summary, and
-returns an exit code. That path makes no SDL call and needs no OMSI asset.
+`--map <directory>` and `--world <directory>` bypass this lifecycle entirely. Both
+branch before any window or device is created; `--map` prints configuration
+metadata, `--world` parses tile placements and prints the world summary. Neither
+path makes an SDL call or needs an OMSI asset.
 
 Failure mapping in `Program`:
 
@@ -236,9 +237,55 @@ Rules that keep the boundary intact:
 - The host exposes it as `--map <directory>`, which is inspection only and cannot
   be combined with `--smoke`.
 
-Not in this layer: tile contents, terrain, objects, splines, Chrono overlays,
-rendering, and any Nymeria scene construction. Those need a separately approved
-scope.
+Not in this layer: tile contents, terrain heights, Chrono overlays, rendering, and
+any Nymeria scene construction. Those need a separately approved scope.
+
+## OMSI tile and world data layer
+
+The layer added by Task 03 lives in `src/Nymeria.OMSI/World/` and reuses the Task 02
+`Maps` layer for discovery, decoding, and the keyword rule. Its format contract is
+[docs/OMSI_WORLD_PARSING.md](OMSI_WORLD_PARSING.md); this section records only the
+architectural boundary.
+
+```text
+explicit map folder
+   └─ OmsiMapDiscovery ──► OmsiMapManifest (tiles, diagnostics, status)
+                                │
+                                ▼
+   for each tile: ConfigTextReader ──► TileWorldParser
+                     ├─ [version]  decides the record layout
+                     ├─ [object]   detail level, path, IDCode, pose, labels
+                     ├─ [spline] / [spline_h]  path, IDCode, neighbours, pose, radius
+                     └─ every other keyword: counted, never reinterpreted
+                                │
+                                ▼
+   immutable OmsiWorldModel (tiles, placements, terrain references,
+                             diagnostics, complete/partial/failed)
+                                │
+                                ▼
+   WorldSummaryWriter ──► bounded console summary, status line last
+```
+
+Rules that keep the boundary intact:
+
+- Parser output only. The model holds no engine type, no GPU resource, no mesh,
+  material, texture, or resolved asset path, and it is not a scene.
+- References stay verbatim. `Sceneryobjects\...` and `Splines\...` are never opened,
+  normalized, or resolved here, so path traversal cannot reach the filesystem and
+  the resolution policy stays in the task that first loads an asset.
+- Raw source values stay raw. No coordinate-system conversion, no Euler convention,
+  no unit change: heading, pitch, bank, x, y, and z are exactly what the tile wrote.
+- Records are read sequentially, not split into blocks first, because a documented
+  object label may itself look like a keyword. A record owns exactly the lines its
+  layout declares, and a truncated record is reported rather than absorbing the
+  next record's fields.
+- Unsupported record types are counted with their first line and preserved; they do
+  not fail a tile, because the documented keyword list is much wider than the
+  interpreted subset.
+- Status is explicit and printed: `complete`, `partial`, or `failed`. Parsing never
+  claims that a map is renderable.
+- The host exposes it as `--world <directory>`, which cannot be combined with
+  `--map` or `--smoke` and creates no window or GPU device.
 
 ## Platform backends
 

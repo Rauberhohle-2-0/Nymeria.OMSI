@@ -164,8 +164,9 @@ when the underlying check was not performed.
 | --- | --- |
 | `src/Nymeria.OMSI/` | Host application: options, lifecycle, clear-frame presentation, diagnostics. |
 | `src/Nymeria.OMSI/Maps/` | Read-only OMSI map metadata discovery and configuration parsing; no engine or SDL types. |
-| `tests/Nymeria.OMSI.Tests/` | Headless tests for GPU-free host code and the map metadata layer (synthetic fixtures only). |
+| `src/Nymeria.OMSI/World/` | Read-only OMSI tile-record parsing and the typed world model; no engine, SDL, or GPU types, and no resolved asset paths. |
+| `tests/Nymeria.OMSI.Tests/` | Headless tests for GPU-free host code, the map metadata layer, and the tile/world layer (synthetic fixtures only). |
 | `external/Nymeria/` | Pinned engine submodule (read-only). |
-| `docs/` | Architecture, development, and map-format documentation. |
+| `docs/` | Architecture, development, and map/world format documentation. |
 | `scripts/` | Repository checks usable locally and in CI. |
 | `.github/workflows/ci.yml` | Build/test on macOS and Windows; commit policy check. |

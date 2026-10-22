@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Nymeria.Omsi.Maps;
+using Nymeria.Omsi.World;
 
 namespace Nymeria.Omsi;
 
@@ -10,8 +11,10 @@ namespace Nymeria.Omsi;
 /// <para>
 /// With no map argument the host initializes the pinned Nymeria engine, presents
 /// cleared frames, and shuts down cleanly. With <c>--map &lt;directory&gt;</c> it
-/// reads only map configuration metadata and diagnostics; that path creates no
-/// window, GPU device, or native SDL call.
+/// reads only map configuration metadata and diagnostics, and with
+/// <c>--world &lt;directory&gt;</c> it additionally parses the tile files into a
+/// read-only world model. Neither inspection path creates a window, GPU device, or
+/// native SDL call.
 /// </para>
 /// <para>
 /// It loads no OMSI assets, maps no terrain, and claims no OMSI runtime
@@ -47,6 +50,11 @@ internal static class Program
             if (options.MapDirectory is not null)
             {
                 return RunMapInspection(options.MapDirectory);
+            }
+
+            if (options.WorldDirectory is not null)
+            {
+                return RunWorldInspection(options.WorldDirectory);
             }
 
             return Run(options);
@@ -137,6 +145,20 @@ internal static class Program
         MapSummaryWriter.Write(Console.Out, manifest);
 
         return manifest.Status == MapScanStatus.Failed
+            ? ExitFailure
+            : ExitSuccess;
+    }
+
+    private static int RunWorldInspection(string mapDirectory)
+    {
+        // Parsing tile placements is also GPU-free. The summary states whether the
+        // map parsed completely, partially, or not at all; it never claims that the
+        // map is renderable.
+        OmsiWorldModel world = OmsiWorldLoader.Load(mapDirectory);
+
+        WorldSummaryWriter.Write(Console.Out, world);
+
+        return world.Status == MapScanStatus.Failed
             ? ExitFailure
             : ExitSuccess;
     }

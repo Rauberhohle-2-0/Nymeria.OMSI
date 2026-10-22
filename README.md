@@ -3,13 +3,15 @@
 An independent, cross-platform OMSI-compatible bus simulation built on the
 [Nymeria](https://github.com/Rauberhohle-2-0/Nymeria) 3D engine.
 
-> **Current state: Task 02 — map metadata discovery.** The host still runs the
-> Task 01 bootstrap (window, engine GPU device, clear frames, clean shutdown). It
-> can now also read one explicitly named map folder: `global.cfg` metadata plus
-> the `tile_x_y.map` inventory, printed as a read-only summary. It does not render
-> a map, load terrain, objects, textures, or vehicles, and it reads no OMSI asset.
-> Nothing here claims OMSI compatibility, and real Grundorf compatibility is
-> pending owner validation on Windows.
+> **Current state: Task 03 — read-only tile and world data parsing.** The host still
+> runs the Task 01 bootstrap (window, engine GPU device, clear frames, clean
+> shutdown). It can also read one explicitly named map folder: `--map` prints
+> `global.cfg` metadata plus the `tile_x_y.map` inventory, and `--world` additionally
+> parses each tile's object and spline placements into a read-only world model with
+> counts, source-located diagnostics, and an explicit status. It does not render a
+> map, build a scene, load terrain heights, meshes, textures, or vehicles, and it
+> reads no OMSI asset. Nothing here claims OMSI compatibility, and real Grundorf
+> compatibility is pending owner validation on Windows.
 
 ## What exists today
 
@@ -19,10 +21,15 @@ An independent, cross-platform OMSI-compatible bus simulation built on the
 - A read-only, GPU-free map metadata layer: `global.cfg` decoding and keyword
   parsing, `tile_x_y.map` discovery, a typed manifest, and source-aware
   diagnostics. See [docs/OMSI_MAP_PARSING.md](docs/OMSI_MAP_PARSING.md).
+- A read-only, GPU-free tile/world layer: version-aware parsing of `[object]`,
+  `[spline]`, and `[spline_h]` records into a typed world model, terrain sidecar
+  size checks, and a deterministic bounded summary. See
+  [docs/OMSI_WORLD_PARSING.md](docs/OMSI_WORLD_PARSING.md).
 - A clear-only frame path with no shader assets and no shader compiler step.
 - Readable startup diagnostics for missing native SDL3, architecture mismatches,
   missing GPU backends, and initialization failures.
-- Headless unit tests for the host's command-line contract.
+- Headless unit tests for the host's command-line contract, the map metadata layer,
+  and the tile/world parser.
 - The engine pinned as a Git submodule at one commit, with no engine source in this
   repository.
 - Enforceable policies: [AGENTS.md](AGENTS.md),
@@ -107,18 +114,39 @@ interpret, and source-aware diagnostics. `status: complete` exits 0,
 The supported subset, its documented source, its limits, and the exact Windows
 validation procedure are in [docs/OMSI_MAP_PARSING.md](docs/OMSI_MAP_PARSING.md).
 
+## Parse tile data (read-only)
+
+`--world` takes the same folder and goes one level deeper: it parses every
+discovered tile's documented placement records into a read-only world model.
+
+```bat
+src\Nymeria.OMSI\bin\Release\net10.0\Nymeria.OMSI.exe --world "<path>\OMSI 2\maps\Grundorf"
+```
+
+The summary reports the map name, discovered and parsed tile counts, tile versions,
+total object and spline placements, terrain sidecar sizes, uninterpreted record
+types, source-located diagnostics, and the parse status. Object and spline
+references are kept verbatim and are never resolved or loaded, and nothing is
+rendered: `status: complete` means the documented record layouts were understood,
+not that the map is renderable.
+
+`--world` cannot be combined with `--map` (its summary already includes the
+discovery metadata) or with `--smoke`. Supported records, version thresholds, known
+limitations, and the Windows validation procedure are in
+[docs/OMSI_WORLD_PARSING.md](docs/OMSI_WORLD_PARSING.md).
+
 ## Platform status
 
 | Platform | Build | Headless tests | Runtime (window, GPU, shutdown) |
 | --- | --- | --- | --- |
-| macOS (development host) | `PASS` — local, macOS 27.0.1 arm64, SDK 10.0.402 | `PASS` — local, 69 tests | `NOT RUN` — intentionally not executed on macOS |
+| macOS (development host) | `PASS` — local, macOS 27.0.1 arm64, SDK 10.0.402 | `PASS` — local, 102 tests | `NOT RUN` — intentionally not executed on macOS |
 | Windows (owner host) | `NOT RUN` — CI job defined, no run recorded yet | `NOT RUN` — CI job defined, no run recorded yet | `NOT RUN (owner validation pending)` |
 | Linux | Not supported | — | Not supported; the engine has no Linux GPU backend |
 
-Map metadata against synthetic fixtures runs headlessly in the unit tests. Map
-metadata against a real Grundorf installation is `NOT RUN (owner validation
-pending)`: no OMSI files exist on the development machine, and no substitute files
-were created to simulate them.
+Map metadata and tile/world parsing against synthetic fixtures run headlessly in the
+unit tests. The same code against a real Grundorf installation is `NOT RUN (owner
+validation pending)`: no OMSI files exist on the development machine, and no
+substitute files were created to simulate them.
 
 The engine itself documents Metal/MSL as validated on macOS and Direct3D 12/DXIL as
 implemented but unverified on Windows hardware. This repository inherits that gap;
@@ -137,6 +165,9 @@ are recorded in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 - [docs/OMSI_MAP_PARSING.md](docs/OMSI_MAP_PARSING.md) — supported map metadata,
   encoding strategy, reference and provenance, limits, Windows validation.
+- [docs/OMSI_WORLD_PARSING.md](docs/OMSI_WORLD_PARSING.md) — interpreted tile
+  records and version thresholds, world model and status semantics, terrain sidecar
+  checks, limits, Windows validation.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — ownership boundary, integration
   decision, host lifecycle, build graph, platform backends, limitations.
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — SDK setup, submodule commands, macOS
@@ -147,15 +178,15 @@ are recorded in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Next milestone
 
-The immediate next step is the owner's Windows validation of `--map` against a
+The immediate next step is the owner's Windows validation of `--world` against a
 legally installed Grundorf, so documented behavior can be separated from confirmed
 behavior.
 
-Any Task 03 needs explicit approval and a separate scope. The narrowest useful
-candidate is a read-only, bounded inventory of one tile file's top-level records
-after the owner's run shows the current metadata layer handles the real folder.
-No terrain rendering, asset conversion, world streaming, vehicle physics, or OMSI
-scripting exists or is approved.
+Any Task 04 needs explicit approval and a separate scope. The narrowest useful
+candidate is the first visible scene built from verified world data, introducing
+asset loading and rendering in separately reviewable increments.
+No terrain mesh generation, spline tessellation, vehicle physics, world streaming,
+or OMSI scripting exists or is approved.
 
 ## License
 

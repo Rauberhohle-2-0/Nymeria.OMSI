@@ -110,14 +110,18 @@ Notes:
 - Builds are warning-free by policy: `TreatWarningsAsErrors` is enabled in
   [Directory.Build.props](../Directory.Build.props) for this repository's
   projects, and the engine keeps its own settings.
-- The test project runs 69 headless tests. They cover command-line parsing and the
-  GPU-free map metadata layer: text encoding selection and fallbacks, keyword-block
+- The test project runs 102 headless tests. They cover command-line parsing, the
+  GPU-free map metadata layer (text encoding selection and fallbacks, keyword-block
   tokenizing, tile file-name parsing, discovery ordering, duplicates, unsupported
-  directives, and summary output. They create no window, no GPU device, and no
-  audio device, and they use only synthetic strings written by the tests.
-- The host itself, including `--map`, is **not** executed on macOS in any task.
-  `dotnet build` and the tests prove compilation and parser behavior, nothing more.
-  A passing map test is not evidence of OMSI/Grundorf compatibility.
+  directives, summary output), and the GPU-free tile/world layer (record layouts by
+  tile version, keyword-like and empty labels, truncated records, malformed numbers,
+  duplicate identifiers, missing versions, uninterpreted record counting, terrain
+  size checks, status transitions, summary truncation). They create no window, no
+  GPU device, and no audio device, and they use only synthetic strings written by
+  the tests.
+- The host itself, including `--map` and `--world`, is **not** executed on macOS in
+  any task. `dotnet build` and the tests prove compilation and parser behavior,
+  nothing more. A passing tile test is not evidence of OMSI/Grundorf compatibility.
 
 Optional formatting check, if `dotnet format` is available in the pinned SDK:
 
@@ -156,6 +160,10 @@ dotnet format Nymeria.OMSI.slnx --verify-no-changes --no-restore
 | `--map` reports `status: failed` and “No global.cfg was found” | The path is not a map folder. Pass the folder that directly contains `global.cfg`, not the `maps` folder above it. |
 | `--map` reports `status: partial` | One or more warnings name the file and line. Read them before assuming the map is broken; unexpected warnings are a reportable finding. |
 | `--map` reports a Latin-1 fallback warning | The file is not valid UTF-8 and has no byte-order mark. OMSI writes UTF-16LE with a mark, so another tool probably saved it. Text in Windows-1252 bytes `0x80`–`0x9F` will not decode as Windows-1252; see [OMSI_MAP_PARSING.md](OMSI_MAP_PARSING.md#text-encoding). |
+| `--world` reports a tile as unparsed | The tile has no usable leading `[version]`. The diagnostic names the tile; check its first lines before assuming a parser bug. |
+| `--world` reports a truncated or malformed `[object]`/`[spline]` | The record does not match the documented layout for its declared version. The warning gives the file and line; report it rather than editing the map. |
+| `--world` reports a terrain size mismatch | The sidecar is not the documented 14,888-byte layout. Heights are not decoded in this task, so the file is only reported. |
+| `--world` reports `status: failed` with “no usable world data” | Not one discovered tile could be interpreted, so there is nothing to describe. Per-tile diagnostics say why. |
 
 ## Continuous integration
 
@@ -273,8 +281,25 @@ its configuration metadata.
    read-only by design. The full procedure and expected observations are in
    [OMSI_MAP_PARSING.md](OMSI_MAP_PARSING.md#on-windows-owner).
 
-   The host's other four steps need no OMSI assets; this step needs only the
-   owner's legally installed map folder.
+6. **Read-only tile and world parsing (Task 03).** Point the parser at the same map
+   folder:
+   ```bat
+   src\Nymeria.OMSI\bin\Release\net10.0\Nymeria.OMSI.exe --world "C:\Program Files (x86)\Steam\steamapps\common\OMSI 2\maps\Grundorf"
+   ```
+   Expected: no window opens, `tiles discovered:` and `tiles parsed:` equal the
+   number of `tile_x_y.map` files, `objects:` and `splines:` are non-zero, tile
+   versions are reported, terrain files at the documented size are counted, and the
+   exit code is `0`. `status: complete` is expected; `status: partial` is acceptable
+   only when its warnings are understood, and `status: failed` is a `FAIL`.
+
+   Repeat for the other stock maps (for example Berlin-Spandau) to cover more tile
+   versions, then run one map twice and confirm identical output. Confirm afterwards
+   that nothing under the OMSI installation changed. The full procedure, expected
+   observations, and what to report are in
+   [OMSI_WORLD_PARSING.md](OMSI_WORLD_PARSING.md#on-windows-owner).
+
+   The host's other five steps need no OMSI assets; these two need only the owner's
+   legally installed map folder.
 
 ### If something fails
 
@@ -286,9 +311,9 @@ Report, in the pull request or issue:
   driver version.
 - Whether `SDL3.dll` was present in the output and its path.
 - Whether the failure is at startup, during presentation, or during shutdown.
-- For `--map`: the scanned path, the full summary, the reported encoding, and every
-  diagnostic with its file and line. Include whether the OMSI installation was
-  modified.
+- For `--map` and `--world`: the scanned path, the full summary, every diagnostic
+  with its file and line, and the tile versions seen. Include whether the OMSI
+  installation was modified.
 
 Keep Windows runtime results authoritative: if the owner reports a `FAIL`, the
 milestone is not verification-complete even when macOS builds and CI are green.

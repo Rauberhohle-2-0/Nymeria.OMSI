@@ -13,9 +13,14 @@ files: `NOT RUN (owner validation pending)`.
 The layer answers one question: *what map is this folder, and which tile files
 does it contain?* It does not load or render a map.
 
+> Tile contents are no longer out of scope: Task 03 parses the documented placement
+> records into a typed world model, documented separately in
+> [OMSI_WORLD_PARSING.md](OMSI_WORLD_PARSING.md). This document stays the contract for
+> discovery and `global.cfg` only.
+
 | Read today | Not read today |
 | --- | --- |
-| `global.cfg` metadata for `[name]`, `[friendlyname]`, `[worldcoordinates]` | Tile file contents (objects, splines, terrain, water, rules) |
+| `global.cfg` metadata for `[name]`, `[friendlyname]`, `[worldcoordinates]` | Tile file contents here; see [OMSI_WORLD_PARSING.md](OMSI_WORLD_PARSING.md) |
 | Presence and location of every `tile_x_y.map` file | `[map]`, `[entrypoints]`, `[groundtex]`, and every other `global.cfg` block |
 | Readability of each discovered tile file | Chrono folders and their `.map` patches |
 | Text encoding actually used for `global.cfg` | `.map.terrain`, `.map.LM.bmp`, `.map.prt` sidecars |
@@ -260,7 +265,9 @@ is exercised through these unit tests only.
 ## Deliberately not implemented
 
 - Rendering a map, creating a Nymeria scene, terrain, or any GPU work.
-- Tile contents: objects, splines, terrain heights, water, light maps, rules.
+- Tile contents in this layer: objects, splines, terrain heights, water, light maps,
+  and rules are the subject of [OMSI_WORLD_PARSING.md](OMSI_WORLD_PARSING.md), not of
+  discovery.
 - `[map]`, `[entrypoints]`, `[groundtex]`, and all other `global.cfg` blocks.
 - Chrono overlays, timetables, traffic, vehicles, scripts, and textures.
 - Editing, repairing, converting, or writing OMSI files.

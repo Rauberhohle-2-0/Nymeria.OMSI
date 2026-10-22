@@ -144,10 +144,68 @@ public sealed class HostOptionsTests
     }
 
     [Fact]
+    public void WorldArgumentCapturesTheDirectory()
+    {
+        bool parsed = HostOptions.TryParse(
+            new[] { "--world", "maps/TestMap" },
+            out HostOptions options,
+            out string? error);
+
+        Assert.True(parsed);
+        Assert.Null(error);
+        Assert.Equal("maps/TestMap", options.WorldDirectory);
+        Assert.Null(options.MapDirectory);
+        Assert.Null(options.MaximumFrames);
+    }
+
+    [Fact]
+    public void WorldArgumentWithoutAValueIsRejected()
+    {
+        bool parsed = HostOptions.TryParse(
+            new[] { "--world" },
+            out _,
+            out string? error);
+
+        Assert.False(parsed);
+        Assert.NotNull(error);
+        Assert.Contains("--world", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WorldArgumentCannotBeRepeated()
+    {
+        bool parsed = HostOptions.TryParse(
+            new[] { "--world", "first", "--world", "second" },
+            out _,
+            out string? error);
+
+        Assert.False(parsed);
+        Assert.NotNull(error);
+        Assert.Contains("more than once", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WorldCannotBeCombinedWithSmokeOrMap()
+    {
+        Assert.False(HostOptions.TryParse(
+            new[] { "--world", "maps/TestMap", "--smoke" },
+            out _,
+            out string? smokeError));
+        Assert.Contains("cannot be combined", smokeError, StringComparison.Ordinal);
+
+        Assert.False(HostOptions.TryParse(
+            new[] { "--map", "maps/TestMap", "--world", "maps/TestMap" },
+            out _,
+            out string? mapError));
+        Assert.Contains("cannot be combined", mapError, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void UsageTextDocumentsEverySupportedArgument()
     {
         Assert.Contains("--smoke", HostOptions.UsageText, StringComparison.Ordinal);
         Assert.Contains("--map", HostOptions.UsageText, StringComparison.Ordinal);
+        Assert.Contains("--world", HostOptions.UsageText, StringComparison.Ordinal);
         Assert.Contains("--help", HostOptions.UsageText, StringComparison.Ordinal);
     }
 }

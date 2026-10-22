@@ -15,6 +15,79 @@ internal readonly record struct KeywordBlock(
     IReadOnlyList<ConfigLine> Parameters);
 
 /// <summary>
+/// The documented rule for what counts as a <c>[keyword]</c> line.
+/// </summary>
+/// <remarks>
+/// Both the block reader and the tile-record parser use this one rule, so a tile's
+/// record boundaries cannot drift from a configuration file's block boundaries.
+/// </remarks>
+internal static class KeywordSyntax
+{
+    /// <summary>
+    /// Tests whether a line is a keyword: a whole line that starts with <c>[</c> at
+    /// the first column, ends with <c>]</c>, and has a non-empty keyword.
+    /// </summary>
+    internal static bool TryReadKeyword(string line, out string keyword)
+    {
+        keyword = string.Empty;
+
+        if (line.Length < 2 || line[0] != '[' || line[^1] != ']')
+        {
+            return false;
+        }
+
+        keyword = line[1..^1];
+        return keyword.Length > 0;
+    }
+
+    /// <summary>
+    /// Reports a keyword-like line that the rule rejects. Indented keyword lines are
+    /// documented help text and switched-off blocks, so they are not reported.
+    /// </summary>
+    internal static void ReportMalformedKeywordLikeLine(
+        ConfigLine line,
+        string path,
+        List<MapDiagnostic> diagnostics)
+    {
+        if (line.Text.Length == 0 || line.Text[0] != '[')
+        {
+            return;
+        }
+
+        string message;
+
+        if (line.Text.Length == 2)
+        {
+            message =
+                "The line '[]' is not a keyword because the brackets are empty, " +
+                "so it is read as a parameter.";
+        }
+        else if (line.Text.TrimEnd().Length != line.Text.Length)
+        {
+            message =
+                "The keyword-like line has trailing whitespace, so OMSI's block " +
+                "format does not treat it as a keyword; it is read as a parameter.";
+        }
+        else if (line.Text[^1] != ']')
+        {
+            message =
+                "The keyword-like line is not closed with ']', so it is read as " +
+                "a parameter.";
+        }
+        else
+        {
+            return;
+        }
+
+        diagnostics.Add(new MapDiagnostic(
+            MapDiagnosticSeverity.Warning,
+            message,
+            path,
+            line.Number));
+    }
+}
+
+/// <summary>
 /// Splits configuration text into <c>[keyword]</c> blocks.
 /// </summary>
 /// <remarks>
@@ -60,7 +133,7 @@ internal static class KeywordBlockReader
 
         foreach (ConfigLine line in text.Lines)
         {
-            if (TryReadKeyword(line.Text, out string keyword))
+            if (KeywordSyntax.TryReadKeyword(line.Text, out string keyword))
             {
                 if (currentKeyword is not null)
                 {
@@ -76,7 +149,7 @@ internal static class KeywordBlockReader
                 continue;
             }
 
-            ReportMalformedKeywordLikeLine(line, path, diagnostics);
+            KeywordSyntax.ReportMalformedKeywordLikeLine(line, path, diagnostics);
 
             currentParameters?.Add(line);
         }
@@ -90,61 +163,5 @@ internal static class KeywordBlockReader
         }
 
         return blocks;
-    }
-
-    private static bool TryReadKeyword(string line, out string keyword)
-    {
-        keyword = string.Empty;
-
-        if (line.Length < 2 || line[0] != '[' || line[^1] != ']')
-        {
-            return false;
-        }
-
-        keyword = line[1..^1];
-        return keyword.Length > 0;
-    }
-
-    private static void ReportMalformedKeywordLikeLine(
-        ConfigLine line,
-        string path,
-        List<MapDiagnostic> diagnostics)
-    {
-        // Indented keyword lines are documented help text and switched-off blocks.
-        if (line.Text.Length == 0 || line.Text[0] != '[')
-        {
-            return;
-        }
-
-        string message;
-
-        if (line.Text.Length == 2)
-        {
-            message =
-                "The line '[]' is not a keyword because the brackets are empty, " +
-                "so it is read as a parameter.";
-        }
-        else if (line.Text.TrimEnd().Length != line.Text.Length)
-        {
-            message =
-                "The keyword-like line has trailing whitespace, so OMSI's block " +
-                "format does not treat it as a keyword; it is read as a parameter.";
-        }
-        else if (line.Text[^1] != ']')
-        {
-            message =
-                "The keyword-like line is not closed with ']', so it is read as " +
-                "a parameter.";
-        }
-        else
-        {
-            return;
-        }
-
-        diagnostics.Add(new MapDiagnostic(
-            MapDiagnosticSeverity.Warning,
-            message,
-            path,
-            line.Number));
     }
 }
