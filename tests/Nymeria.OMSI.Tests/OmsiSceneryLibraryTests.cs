@@ -92,6 +92,61 @@ public sealed class OmsiSceneryLibraryTests
     }
 
     [Fact]
+    public void ParsesABrokenDefinitionOnceAndCountsEverySkippedPlacement()
+    {
+        using Installation installation = Installation.Create(
+            objectPlacements: 2,
+            scoContent: "[script]\r\nscript.osc\r\n[mesh]\r\nmissing.x\r\n",
+            writeMesh: false,
+            writeTexture: false);
+
+        OmsiWorldModel world = OmsiWorldLoader.Load(installation.MapDirectory);
+        OmsiTerrainSet terrain = OmsiTerrainSet.Load(world);
+        OmsiSceneryLibrary scene = OmsiSceneryLibrary.Load(
+            world,
+            TerrainHeightSampler.Create(terrain),
+            installation.RootPath);
+
+        Assert.Empty(scene.Instances);
+        Assert.Equal(2, scene.Counts.PlacementsConsidered);
+        Assert.Equal(0, scene.Counts.ModelsLoaded);
+
+        // The definition is parsed once, so the unsupported keyword occurs once, while
+        // both placements are still counted as failures.
+        Assert.Equal(1, scene.Counts.UnsupportedKeywords);
+        Assert.Equal(2, scene.Counts.DefinitionFailures);
+
+        Assert.Single(
+            scene.Diagnostics,
+            diagnostic => diagnostic.Message.Contains(
+                "could not be resolved",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ReportsAMissingTextureReachedByADrawnSubset()
+    {
+        using Installation installation = Installation.Create(
+            objectPlacements: 1,
+            writeTexture: false);
+
+        OmsiWorldModel world = OmsiWorldLoader.Load(installation.MapDirectory);
+        OmsiTerrainSet terrain = OmsiTerrainSet.Load(world);
+        OmsiSceneryLibrary scene = OmsiSceneryLibrary.Load(
+            world,
+            TerrainHeightSampler.Create(terrain),
+            installation.RootPath);
+
+        Assert.Single(scene.Instances);
+        Assert.Equal(1, scene.Counts.TexturesMissing);
+        Assert.Contains(
+            scene.Diagnostics,
+            diagnostic => diagnostic.Message.Contains(
+                "The texture 'wall.bmp' could not be resolved",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void PlacesTerrainRelativeObjectsOnTheDecodedGround()
     {
         using Installation installation = Installation.Create(objectPlacements: 1);
@@ -247,7 +302,10 @@ public sealed class OmsiSceneryLibraryTests
 
         internal static Installation Create(
             int objectPlacements,
-            string objectReference = @"Sceneryobjects\Test\object.sco")
+            string objectReference = @"Sceneryobjects\Test\object.sco",
+            string? scoContent = null,
+            bool writeMesh = true,
+            bool writeTexture = true)
         {
             var root = new TemporaryDirectory();
 
@@ -290,17 +348,27 @@ public sealed class OmsiSceneryLibraryTests
                 "Sceneryobjects",
                 "Test");
 
-            Directory.CreateDirectory(objectDirectory);
+            string modelDirectory = Path.Combine(objectDirectory, "model");
+            string textureDirectory = Path.Combine(objectDirectory, "texture");
+            Directory.CreateDirectory(modelDirectory);
+            Directory.CreateDirectory(textureDirectory);
 
             string scoPath = Path.Combine(objectDirectory, "object.sco");
-            File.WriteAllText(scoPath, "[model]\r\nmodel.cfg\r\n");
             File.WriteAllText(
-                Path.Combine(objectDirectory, "model.cfg"),
-                "[mesh]\r\nbox.x\r\n[matl]\r\nwall.bmp\r\n");
-            File.WriteAllText(Path.Combine(objectDirectory, "box.x"), Mesh);
-            File.WriteAllBytes(
-                Path.Combine(objectDirectory, "wall.bmp"),
-                Bitmap());
+                scoPath,
+                scoContent ?? "[mesh]\r\nbox.x\r\n[matl]\r\nwall.bmp\r\n");
+
+            if (writeMesh)
+            {
+                File.WriteAllText(Path.Combine(modelDirectory, "box.x"), Mesh);
+            }
+
+            if (writeTexture)
+            {
+                File.WriteAllBytes(
+                    Path.Combine(textureDirectory, "wall.bmp"),
+                    Bitmap());
+            }
 
             return new Installation(root, mapDirectory, scoPath);
         }

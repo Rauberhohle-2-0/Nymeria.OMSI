@@ -12,10 +12,6 @@ namespace Nymeria.OMSI.Tests;
 public sealed class SceneryPathTests
 {
     [Theory]
-    [InlineData(@"..\..\Windows\System32\evil.sco")]
-    [InlineData("../maps/TestMap/global.cfg")]
-    [InlineData(@"Sceneryobjects\..\..\secret.sco")]
-    [InlineData(@"Sceneryobjects\.\object.sco")]
     [InlineData(@"C:\Windows\notepad.exe")]
     [InlineData(@"C:object.sco")]
     [InlineData(@"\\server\share\object.sco")]
@@ -23,12 +19,36 @@ public sealed class SceneryPathTests
     [InlineData(@"Sceneryobjects\\object.sco")]
     [InlineData(@"Sceneryobjects\object.sco:stream")]
     [InlineData("")]
-    public void RejectsReferencesThatAreAbsoluteOrContainRelativeComponents(string reference)
+    public void RejectsReferencesThatAreAbsoluteOrMalformed(string reference)
     {
         Assert.False(SceneryPath.TryNormalize(reference, out string[] segments, out string? error));
 
         Assert.Empty(segments);
         Assert.False(string.IsNullOrWhiteSpace(error));
+    }
+
+    [Fact]
+    public void DropsDotComponents()
+    {
+        Assert.True(SceneryPath.TryNormalize(
+            @"Sceneryobjects\.\object.sco",
+            out string[] segments,
+            out string? error));
+
+        Assert.Null(error);
+        Assert.Equal(["Sceneryobjects", "object.sco"], segments);
+    }
+
+    [Fact]
+    public void KeepsParentComponentsForTheCallerToBound()
+    {
+        Assert.True(SceneryPath.TryNormalize(
+            @"..\Shared\model\box.x",
+            out string[] segments,
+            out string? error));
+
+        Assert.Null(error);
+        Assert.Equal(["..", "Shared", "model", "box.x"], segments);
     }
 
     [Fact]
@@ -62,6 +82,60 @@ public sealed class SceneryPathTests
 
         Assert.Equal(SceneryPathStatus.Resolved, result.Status);
         Assert.Equal(Path.GetFullPath(expected), Path.GetFullPath(result.Path!));
+    }
+
+    [Fact]
+    public void ResolvesAParentReferenceThatStaysInsideTheRoot()
+    {
+        using var root = new TemporaryDirectory();
+        string objectDirectory = Path.Combine(root.Path, "Sceneryobjects", "Test");
+        Directory.CreateDirectory(objectDirectory);
+        Directory.CreateDirectory(
+            Path.Combine(root.Path, "Sceneryobjects", "Shared", "model"));
+
+        string expected = root.WriteUtf8(
+            Path.Combine("Sceneryobjects", "Shared", "model", "box.x"),
+            "xof 0303txt 0032");
+
+        SceneryPathResult result = SceneryPath.ResolveRelative(
+            root.Path,
+            objectDirectory,
+            @"..\Shared\model\box.x");
+
+        Assert.Equal(SceneryPathStatus.Resolved, result.Status);
+        Assert.Equal(Path.GetFullPath(expected), Path.GetFullPath(result.Path!));
+    }
+
+    [Fact]
+    public void RejectsAParentReferenceThatClimbsAboveTheRoot()
+    {
+        using var root = new TemporaryDirectory();
+        string objectDirectory = Path.Combine(root.Path, "Sceneryobjects", "Test");
+        Directory.CreateDirectory(objectDirectory);
+
+        SceneryPathResult result = SceneryPath.ResolveRelative(
+            root.Path,
+            objectDirectory,
+            @"..\..\..\outside.sco");
+
+        Assert.Equal(SceneryPathStatus.Rejected, result.Status);
+        Assert.Null(result.Path);
+        Assert.Contains("climbs above", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RejectsABaseDirectoryOutsideTheRoot()
+    {
+        using var root = new TemporaryDirectory();
+        using var outside = new TemporaryDirectory();
+
+        SceneryPathResult result = SceneryPath.ResolveRelative(
+            root.Path,
+            outside.Path,
+            "object.sco");
+
+        Assert.Equal(SceneryPathStatus.Rejected, result.Status);
+        Assert.Contains("not below", result.Error, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -40,12 +40,11 @@ internal readonly record struct SceneryTextureReference(
 /// render loop.
 /// </para>
 /// <para>
-/// The <c>[model]</c> keyword is read in both forms the documented file grammar
-/// permits: it either names a further configuration file (the usual
-/// <c>model.cfg</c> indirection) or is followed by inline <c>[mesh]</c> and
-/// <c>[matl]</c> blocks in the same file. Which form a real object uses is recorded in
-/// <see cref="UsesExternalModelConfig"/>, so a Windows run can confirm the reading
-/// from the loaded-mesh counts instead of trusting an assumption.
+/// The <c>[model]</c> keyword is optional. A definition may write inline <c>[mesh]</c>
+/// and <c>[matl]</c> blocks (the usual scenery form), point at a further configuration
+/// file (<c>model.cfg</c>), or name a decodable mesh directly. Which form a real object
+/// used is recorded in <see cref="UsesExternalModelConfig"/>, so a Windows run can
+/// confirm the reading from the loaded-mesh counts instead of trusting an assumption.
 /// </para>
 /// <para>
 /// Scripts, animations, interaction, collision, seasonal behavior, and advanced
@@ -58,6 +57,7 @@ internal sealed class SceneryDefinition
     internal SceneryDefinition(
         string reference,
         string scoPath,
+        string scoDirectory,
         string assetDirectory,
         string? modelConfigPath,
         bool usesExternalModelConfig,
@@ -70,6 +70,7 @@ internal sealed class SceneryDefinition
     {
         Reference = reference;
         ScoPath = scoPath;
+        ScoDirectory = scoDirectory;
         AssetDirectory = assetDirectory;
         ModelConfigPath = modelConfigPath;
         UsesExternalModelConfig = usesExternalModelConfig;
@@ -87,8 +88,11 @@ internal sealed class SceneryDefinition
     /// <summary>Gets the resolved <c>.sco</c> file.</summary>
     internal string ScoPath { get; }
 
+    /// <summary>Gets the folder that contains the <c>.sco</c> file.</summary>
+    internal string ScoDirectory { get; }
+
     /// <summary>
-    /// Gets the folder that mesh and texture references are relative to: the model
+    /// Gets the folder of the configuration that declared the meshes: the model
     /// configuration's folder, or the <c>.sco</c> folder when the model is inline.
     /// </summary>
     internal string AssetDirectory { get; }

@@ -49,10 +49,20 @@ internal static class ScenerySummaryWriter
         double tileEdge = OmsiTileGrid.EdgeMeters(world.UsesWorldCoordinates);
         SceneryLoadCounts counts = scene.Counts;
 
-        writer.WriteLine(
-            "scene: decoded OMSI terrain with loaded OMSI scenery objects " +
-            "(a bounded, partial scene; roads, splines, vehicles, and scripts are " +
-            "not rendered)");
+        if (counts.InstancesCreated == 0)
+        {
+            writer.WriteLine(
+                "scene: decoded OMSI terrain only; no scenery object could be loaded " +
+                "(a bounded, partial scene; roads, splines, vehicles, and scripts are " +
+                "not rendered)");
+        }
+        else
+        {
+            writer.WriteLine(
+                "scene: decoded OMSI terrain with loaded OMSI scenery objects " +
+                "(a bounded, partial scene; roads, splines, vehicles, and scripts are " +
+                "not rendered)");
+        }
 
         writer.WriteLine($"map: {world.MapRoot}");
         writer.WriteLine("name: " + (world.Name ?? "(unavailable)"));

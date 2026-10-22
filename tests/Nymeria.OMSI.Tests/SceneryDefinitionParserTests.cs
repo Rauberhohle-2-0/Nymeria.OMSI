@@ -58,6 +58,175 @@ public sealed class SceneryDefinitionParserTests
     }
 
     [Fact]
+    public void ReadsInlineMeshesFromTheDocumentedModelAndTextureFolders()
+    {
+        using Fixture fixture = Fixture.Create(
+            sco: "[mesh]\r\nbox.x\r\n[matl]\r\nwall.bmp\r\n",
+            modelConfig: null);
+
+        fixture.Delete("box.x");
+        fixture.Delete("wall.bmp");
+        fixture.WriteAt(Path.Combine("model", "box.x"), ModelX);
+        fixture.WriteAt(Path.Combine("texture", "wall.bmp"), "bmp");
+
+        SceneryParseResult result = Parse(fixture);
+
+        Assert.NotNull(result.Definition);
+        Assert.False(result.Definition!.UsesExternalModelConfig);
+        Assert.EndsWith(
+            Path.Combine("model", "box.x"),
+            result.Definition.Meshes[0].Path,
+            StringComparison.Ordinal);
+        Assert.EndsWith(
+            Path.Combine("texture", "wall.bmp"),
+            result.Definition.Textures[0].Path,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AcceptsAnInlineMeshWithoutAModelBlock()
+    {
+        using Fixture fixture = Fixture.Create(
+            sco: "[mesh]\r\nbox.x\r\n",
+            modelConfig: null);
+
+        SceneryParseResult result = Parse(fixture);
+
+        Assert.NotNull(result.Definition);
+        Assert.DoesNotContain(
+            result.Diagnostics,
+            diagnostic => diagnostic.Message.Contains(
+                "no [model]",
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ReadsAMeshNamedDirectlyByTheModelBlock()
+    {
+        using Fixture fixture = Fixture.Create(
+            sco: "[model]\r\nbox.x\r\n",
+            modelConfig: null);
+
+        SceneryParseResult result = Parse(fixture);
+
+        Assert.NotNull(result.Definition);
+        Assert.False(result.Definition!.UsesExternalModelConfig);
+        Assert.Single(result.Definition.Meshes);
+        Assert.True(result.Definition.Meshes[0].IsResolved);
+    }
+
+    [Fact]
+    public void ReadsAParentReferenceThatStaysInsideTheContentRoot()
+    {
+        using Fixture fixture = Fixture.Create(
+            sco: "[mesh]\r\n..\\Shared\\model\\box.x\r\n",
+            modelConfig: null);
+
+        string sharedDirectory = Path.Combine(
+            fixture.Root.Path,
+            "Sceneryobjects",
+            "Shared",
+            "model");
+
+        Directory.CreateDirectory(sharedDirectory);
+        File.WriteAllText(Path.Combine(sharedDirectory, "box.x"), ModelX);
+
+        SceneryParseResult result = Parse(fixture);
+
+        Assert.NotNull(result.Definition);
+        Assert.True(result.Definition!.Meshes[0].IsResolved);
+        Assert.EndsWith(
+            Path.Combine("Shared", "model", "box.x"),
+            result.Definition.Meshes[0].Path,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResolvesAnExternalModelConfigurationInItsOwnFolder()
+    {
+        using Fixture fixture = Fixture.Create(
+            sco: "[model]\r\nmodel\\model.cfg\r\n",
+            modelConfig: null);
+
+        fixture.Delete("box.x");
+        fixture.Delete("wall.bmp");
+        fixture.WriteAt(
+            Path.Combine("model", "model.cfg"),
+            "[mesh]\r\nbox.x\r\n[matl]\r\nwall.bmp\r\n");
+        fixture.WriteAt(Path.Combine("model", "box.x"), ModelX);
+        fixture.WriteAt(Path.Combine("texture", "wall.bmp"), "bmp");
+
+        SceneryParseResult result = Parse(fixture);
+
+        Assert.NotNull(result.Definition);
+        Assert.True(result.Definition!.UsesExternalModelConfig);
+        Assert.EndsWith(
+            Path.Combine("Test", "model"),
+            result.Definition.AssetDirectory,
+            StringComparison.Ordinal);
+        Assert.EndsWith(
+            Path.Combine("Test", "model", "box.x"),
+            result.Definition.Meshes[0].Path,
+            StringComparison.Ordinal);
+        Assert.EndsWith(
+            Path.Combine("Test", "texture", "wall.bmp"),
+            result.Definition.Textures[0].Path,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResolvesATextureFromTheGlobalTextureFolder()
+    {
+        using Fixture fixture = Fixture.Create(
+            sco: "[mesh]\r\nbox.x\r\n[matl]\r\nglobal.bmp\r\n",
+            modelConfig: null);
+
+        string globalDirectory = Path.Combine(fixture.Root.Path, "Texture");
+        Directory.CreateDirectory(globalDirectory);
+        File.WriteAllText(Path.Combine(globalDirectory, "global.bmp"), "bmp");
+
+        SceneryParseResult result = Parse(fixture);
+
+        Assert.NotNull(result.Definition);
+        Assert.EndsWith(
+            Path.Combine("Texture", "global.bmp"),
+            result.Definition!.Textures[0].Path,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PrefersADdsTextureVariant()
+    {
+        using Fixture fixture = Fixture.Create(
+            sco: "[mesh]\r\nbox.x\r\n[matl]\r\nwall.bmp\r\n",
+            modelConfig: null);
+
+        fixture.Write("wall.dds", "dds");
+
+        SceneryParseResult result = Parse(fixture);
+
+        Assert.NotNull(result.Definition);
+        Assert.EndsWith(
+            "wall.dds",
+            result.Definition!.Textures[0].Path,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ReportsAMissingTextureWithoutThrowing()
+    {
+        using Fixture fixture = Fixture.Create(
+            sco: "[mesh]\r\nbox.x\r\n[matl]\r\nabsent.dds\r\n",
+            modelConfig: null);
+
+        SceneryParseResult result = Parse(fixture);
+
+        Assert.NotNull(result.Definition);
+        Assert.Null(result.Definition!.Textures[0].Path);
+        Assert.Contains("not found", result.Definition.Textures[0].Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void IgnoresSwitchedOffBlocksAndCommentLines()
     {
         using Fixture fixture = Fixture.Create(
@@ -147,6 +316,24 @@ public sealed class SceneryDefinitionParserTests
         Assert.Contains(
             result.Diagnostics,
             diagnostic => diagnostic.Message.Contains("..", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RejectsAMeshReferenceThatClimbsAboveTheContentRoot()
+    {
+        using Fixture fixture = Fixture.Create(
+            sco: "[mesh]\r\n..\\..\\..\\outside.x\r\n",
+            modelConfig: null);
+
+        SceneryParseResult result = Parse(fixture);
+
+        Assert.NotNull(result.Definition);
+        Assert.False(result.Definition!.Meshes[0].IsResolved);
+        Assert.Contains(
+            result.Diagnostics,
+            diagnostic => diagnostic.Message.Contains(
+                "climbs above",
+                StringComparison.Ordinal));
     }
 
     [Fact]
@@ -240,8 +427,21 @@ public sealed class SceneryDefinitionParserTests
 
         internal void Write(string fileName, string content)
         {
+            WriteAt(fileName, content);
+        }
+
+        internal void WriteAt(string relativePath, string content)
+        {
             string directory = Path.GetDirectoryName(ScoPath)!;
-            File.WriteAllText(Path.Combine(directory, fileName), content);
+            string path = Path.Combine(directory, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, content);
+        }
+
+        internal void Delete(string fileName)
+        {
+            string directory = Path.GetDirectoryName(ScoPath)!;
+            File.Delete(Path.Combine(directory, fileName));
         }
 
         public void Dispose()

@@ -59,20 +59,45 @@ definition:
 - Both `\` and `/` separate components; the reference is normalized for inspection but
   the reported path keeps its original spelling.
 - A reference that is absolute (`\...`, `/...`, `\\server\...`), drive-qualified
-  (`C:\...`), contains `.` or `..`, has an empty component (doubled separator), a `:`
-  inside a component, or a control character is **rejected** before the filesystem is
-  touched. Nothing is repaired or guessed.
+  (`C:\...`), has an empty component (doubled separator), a `:` inside a component, or
+  a control character is **rejected** before the filesystem is touched. Nothing is
+  repaired or guessed.
+- `.` is dropped. `..` is kept by the normalizer and combined with the reference's base
+  directory, because OMSI deliberately uses it for sibling collections
+  (`..\..\Kreuz_MC\model\...`). The combined result is accepted only while it stays
+  below the content root; a reference that climbs above the root is **rejected**.
 - Each component is matched against a real directory entry **case-insensitively**, so a
   Windows-authored path resolves on a case-sensitive filesystem. Two entries that
   differ only in case are reported as ambiguous rather than chosen arbitrarily.
 - A directory with more than 20,000 entries is reported instead of scanned, which
   bounds the cost of a hostile or damaged layout.
-- Because only normalized components are combined with a directory, and every
-  intermediate path is required to stay under the root, a resolved file cannot escape
-  the authorized content tree.
+- Only explicit candidate folders are inspected; there is no recursive search. Every
+  candidate is required to stay under the content root, so a resolved file cannot
+  escape the authorized content tree.
 
 The installation root is derived only from a map folder whose parent directory is
 named `maps`, case-insensitively. No Steam, Aerosoft, or default path is ever assumed.
+
+### Asset search order
+
+The documented OMSI layout puts meshes and textures in subfolders of the object
+collection, so the resolver tries the following folders in order and takes the first
+existing file:
+
+| Asset | Folders tried |
+| --- | --- |
+| Mesh | the model-configuration folder, `<config>\model`, `<sco>\model`, the `<sco>` folder, the content root |
+| Texture | the model-configuration folder, `<config>\texture`, the `<sco>` folder, `<sco>\texture`, the content root, `<root>\Texture` |
+
+For a texture whose declared name has another extension, the `.dds` spelling is tried
+first in each folder, matching OMSI's preference for the DDS variant when both files
+exist. A missing file is reported with the folders that were searched; an unsupported
+mesh extension is reported as such, and a decode failure is reported by the decoder.
+The three cases are not conflated.
+
+A definition's failed parse is also cached: a broken `.sco` referenced by hundreds of
+placements is parsed once, its diagnostics are listed once, and every skipped placement
+is still counted.
 
 ## Supported definition subset
 
@@ -88,9 +113,9 @@ honoured before that split:
 
 | Keyword | Handling |
 | --- | --- |
-| `[model]` | The first parameter is read as a further configuration file when it ends in `.cfg` or `.sco`; otherwise the `.sco`'s own inline model sections are used |
-| `[mesh]` | A mesh reference, resolved relative to the model folder, then the installation root |
-| `[matl]` | A texture name (first parameter); additional parameters, including the material index, are not interpreted |
+| `[model]` | Optional. Its first parameter is read as a further configuration file when it ends in `.cfg` or `.sco`, as a mesh when it has a decodable extension, or otherwise ignored with a warning |
+| `[mesh]` | A mesh reference, resolved through the documented model folders, then the installation root |
+| `[matl]` | A texture name (first parameter), resolved through the documented texture folders; additional parameters, including the texture-occurrence index, are not interpreted |
 | `[absheight]` | Standalone flag: the placement height is absolute, not terrain-relative |
 
 `[groups]`, `[friendlyname]`, `[description]`, and similar user-interface metadata are
@@ -99,13 +124,14 @@ interaction, collision, advanced material effects — is counted, and the first 
 distinct spellings are named in the diagnostics. No meaning is invented for them.
 
 **Documented versus assumed.** The keyword-block syntax, the switch-off markers, the
-apostrophe comment, and `[absheight]` are documented (openOMSI `docs/FORMATS.md` and
-the OMSI WebDisk configuration-file guide, both inspected on 2026-10-22). The `[model]`
-indirection itself is **not** documented in the sources that were checked: whether a
-real object points at a `model.cfg` or writes `[mesh]` inline is not verified. The
-reader therefore accepts both forms, records which one the file used, and reports it,
-so the owner's Windows run can confirm the reading from the loaded-mesh counts instead
-of trusting an assumption.
+apostrophe comment, `[absheight]`, the `model`/`texture` asset folders, and the inline
+`[mesh]` form are documented (openOMSI `docs/FORMATS.md`, the OMSI WebDisk
+configuration-file guide, the OMSI Wiki, and the SGNL file reference, all inspected on
+2026-10-22). A scenery definition is **not** required to have a `[model]` block: real
+Grundorf objects such as `Sceneryobjects\Ruede\forest_backdrop01.sco` write
+`[mesh] forest_backdrop01.x` inline while the file itself lives in `Ruede\model`. The
+reader accepts the inline form without a warning, and also accepts the `model.cfg`
+indirection and a mesh named directly by `[model]`.
 
 A mesh is only accepted with a decoded extension: `.o3d` and `.x`. Any other extension
 is reported as *unsupported format*, not skipped silently.
@@ -122,10 +148,11 @@ is reported as *unsupported format*, not skipped silently.
   material tint.
 - Material names come from the mesh itself. A subset whose material name matches a
   declared `[matl]` entry uses that texture; otherwise the name is resolved as a
-  texture reference in the model folder, the installation root, and `<root>\Texture`.
-  This is the name-based rule OMSI meshes use, and it means `.x` models whose material
-  names are arbitrary labels (rather than texture file names) can show as missing
-  textures. That limitation is reported, not hidden.
+  texture reference through the same documented texture folders. This is the name-based
+  rule OMSI meshes use, and it means `.x` models whose material names are arbitrary
+  labels (rather than texture file names) can show as missing textures. A texture that
+  cannot be resolved is reported once per distinct message, and the affected subset is
+  counted and drawn with its base color rather than hidden or replaced.
 - Every scenery material is drawn with a single 0.5 alpha test, which covers OMSI's
   one-bit transparency for foliage, railings, and window cut-outs. Per-material
   thresholds and blended transparency are not interpreted.
@@ -181,19 +208,24 @@ pipeline exists, so both passes share one depth format and one render pass.
 
 **Caching.** One resolved `.sco` path maps to one parsed definition and one model; one
 mesh file maps to one set of vertex and index buffers; one decoded texture maps to one
-GPU texture. Two hundred instances of one building therefore cost one decode, one
-upload, and two hundred model-matrix pushes. Nothing is decoded or uploaded per frame;
-a frame pushes two matrices per instance and issues one draw per subset.
+GPU texture. A failed definition is cached as a failure, so the same broken file is
+parsed once rather than once per placement. Two hundred instances of one building
+therefore cost one decode, one upload, and two hundred model-matrix pushes. Nothing is
+decoded or uploaded per frame; a frame pushes two matrices per instance and issues one
+draw per subset.
 
 **Bounds.** Every limit is a constant with a counted, reported consequence:
 2,000 instances, 256 definitions, 512 mesh files, 512 textures, 4,000,000 decoded
 vertices, 64 meshes and 256 `[matl]` entries per definition, 512 KiB and 20,000 lines
-per configuration file, 40 individually reported problems.
+per configuration file, 40 distinct listed problems with repeated messages counted
+separately.
 
 **Failure handling.** A model that cannot be decoded is dropped with a count. A model
 that fails to upload is dropped with a count and a console line, so one broken asset
 cannot take the window down. Only a scene where nothing at all could be prepared fails
-creation, because then the caller must be told the view would be empty.
+creation, because then the caller must be told the view would be empty. When zero
+placements become instances, the first summary line says the view would be terrain only
+rather than claiming that scenery loaded.
 
 **Lifetime.** `SceneryRenderer.Dispose` releases buffers, textures, the sampler, the
 pipeline, and the shaders after draining the GPU; `ScenePresenter.Dispose` calls it
@@ -246,8 +278,12 @@ read or copied):
 | `[absheight]` makes a placement's z absolute | Documented |
 | Terrain-relative z otherwise | Documented |
 | `[mesh]` names a mesh file; `[matl]` names a texture | Documented |
-| `[model]` points at a further configuration file | **Not verified**; both forms are accepted and reported |
-| Material-name to texture matching, and the `<root>\Texture` fallback | **Inferred**; model-folder-first is the documented asset-folder rule |
+| Inline `[mesh]` without a `[model]` block is the usual scenery form | Documented; Grundorf's `Ruede\forest_backdrop01.sco` is an example |
+| Meshes may live in the object folder or its `model` subfolder | Documented |
+| Textures may live in the object folder, its `texture` subfolder, or `<root>\Texture` | Documented |
+| `.dds` wins over the declared texture extension when both exist | Documented; the resolver tries `.dds` first |
+| `[model]` points at a further configuration file | Documented; the reader still accepts both forms and reports which was used |
+| Material-name to texture matching | **Inferred** from OMSI mesh behavior; the documented folder rules are used for resolution |
 | Pitch/bank order and sign | **Assumed**; documented only for heading |
 | Alpha test threshold 0.5 for all scenery | **Assumed**; per-material thresholds are not interpreted |
 | OMSI grid orientation, terrain relief, and object placement on Windows | **Unverified** until the owner runs it |

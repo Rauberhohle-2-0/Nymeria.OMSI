@@ -362,7 +362,7 @@ boundary.
 OmsiObjectPlacement (Task 03) + derived installation root + TerrainHeightSampler
         │
         ▼
-SceneryPath ──► resolved .sco under the content root (case-insensitive, no traversal)
+SceneryPath ──► resolved .sco under the content root (case-insensitive, bounded traversal)
         │
         ▼
 SceneryDefinitionParser ──► meshes, [matl] textures, [absheight], unsupported keywords
@@ -387,11 +387,14 @@ Rules that keep the boundary intact:
 - **The engine decodes the formats.** `.o3d`, `.x`, and every texture go through the
   engine's own parsers and texture loader. This repository adds a resolution policy and
   a cache, not a decoder, and it changes no engine file.
-- **Untrusted content is bounded.** References are rejected rather than repaired if
-  they are absolute, traversing, drive-qualified, empty-component, or control-character
-  paths; every limit is a constant with a counted consequence (2,000 instances, 256
-  definitions, 512 meshes, 512 textures, 4,000,000 vertices, 64 meshes per definition,
-  40 listed problems).
+- **Untrusted content is bounded.** References are resolved only against explicit
+  documented asset folders, and rejected rather than repaired if they are absolute,
+  drive-qualified, empty-component, or control-character paths, or if a legitimate
+  `..` component would leave the content root. Case-insensitive lookup and a per-folder
+  entry limit keep resolution safe on a case-sensitive filesystem. Every limit is a
+  constant with a counted consequence (2,000 instances, 256 definitions, 512 meshes,
+  512 textures, 4,000,000 vertices, 64 meshes per definition, 40 distinct listed
+  problems).
 - **Placement semantics stay OMSI's.** Tile-local x/y plus the shared tile origin, z
   terrain-relative unless `[absheight]`, and no snapping to the ground. The one
   undocumented convention — pitch/bank order — is written down as an assumption in one

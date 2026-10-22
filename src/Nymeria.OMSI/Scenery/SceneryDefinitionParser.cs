@@ -3,6 +3,16 @@ using Nymeria.Omsi.Maps;
 
 namespace Nymeria.Omsi.Scenery;
 
+/// <summary>The kind of asset a reference names, which selects the search folders.</summary>
+internal enum SceneryAssetKind
+{
+    /// <summary>A mesh file, looked for in the definition's model locations.</summary>
+    Mesh,
+
+    /// <summary>A texture file, looked for in the definition's texture locations.</summary>
+    Texture,
+}
+
 /// <summary>
 /// Reads the supported subset of an OMSI <c>.sco</c> scenery definition and the model
 /// configuration it names.
@@ -18,17 +28,22 @@ namespace Nymeria.Omsi.Scenery;
 /// the documented way to comment out one line.
 /// </para>
 /// <para>
-/// Interpreted keywords are <c>[model]</c> (a further configuration file, or inline
-/// model sections), <c>[mesh]</c> (a mesh file), <c>[matl]</c> (a texture name used by a
-/// mesh subset), and <c>[absheight]</c> (a standalone flag meaning the placement
-/// height is absolute). Everything else is counted, named, and left uninterpreted:
-/// scripts, animations, interaction, collision, and advanced material effects are out
-/// of scope, and no meaning is invented for a keyword this reader does not know.
+/// Interpreted keywords are <c>[model]</c> (an optional further configuration file, or
+/// an inline model mesh), <c>[mesh]</c> (a mesh file), <c>[matl]</c> (a texture name
+/// used by a mesh subset), and <c>[absheight]</c> (a standalone flag meaning the
+/// placement height is absolute). A scenery definition does not need a <c>[model]</c>
+/// block: an inline <c>[mesh]</c> list is the usual form. Everything else is counted,
+/// named, and left uninterpreted: scripts, animations, interaction, collision, and
+/// advanced material effects are out of scope, and no meaning is invented for a keyword
+/// this reader does not know.
 /// </para>
 /// <para>
-/// Mesh and texture files are resolved while parsing, under the same
-/// traversal-safe rules as <see cref="SceneryPath"/>. A missing file is a diagnostic,
-/// not an exception, so one damaged object cannot stop the map from loading.
+/// Mesh and texture files are resolved while parsing, under the same traversal-safe
+/// rules as <see cref="SceneryPath"/>. OMSI writes these references relative to the
+/// definition's own folder or to its documented <c>model</c> and <c>texture</c>
+/// subfolders, so each documented location is tried in order without a recursive
+/// search. A missing file is a diagnostic, not an exception, so one damaged object
+/// cannot stop the map from loading.
 /// </para>
 /// </remarks>
 internal static class SceneryDefinitionParser
@@ -97,7 +112,7 @@ internal static class SceneryDefinitionParser
         ArgumentNullException.ThrowIfNull(reference);
         ArgumentException.ThrowIfNullOrWhiteSpace(contentRoot);
 
-        var diagnostics = new List<MapDiagnostic>();
+        var diagnostics = new SceneryDiagnostics(int.MaxValue);
 
         IReadOnlyList<KeywordBlock> blocks = ReadBlocks(
             scoPath,
@@ -106,18 +121,18 @@ internal static class SceneryDefinitionParser
 
         if (readFailed)
         {
-            return new SceneryParseResult(null, diagnostics);
+            return new SceneryParseResult(null, diagnostics.Diagnostics);
         }
 
         if (blocks.Count == 0)
         {
-            diagnostics.Add(new MapDiagnostic(
+            diagnostics.Report(
                 MapDiagnosticSeverity.Warning,
                 "The scenery definition has no [keyword] blocks, so it describes no " +
                 "model.",
-                scoPath));
+                scoPath);
 
-            return new SceneryParseResult(null, diagnostics);
+            return new SceneryParseResult(null, diagnostics.Diagnostics);
         }
 
         var unsupported = new OrderedKeywordSet();
@@ -143,8 +158,11 @@ internal static class SceneryDefinitionParser
             unsupported.Add(keyword);
         }
 
-        string assetDirectory = Path.GetDirectoryName(scoPath) ?? contentRoot;
+        string scoDirectory = Path.GetDirectoryName(scoPath) ?? contentRoot;
+        string assetDirectory = scoDirectory;
         string? modelConfigPath = null;
+        string? inlineModelMesh = null;
+        int inlineModelLine = 0;
         bool usesExternalModelConfig = false;
 
         if (TryFindBlock(blocks, "model", out KeywordBlock modelBlock))
@@ -153,16 +171,17 @@ internal static class SceneryDefinitionParser
 
             if (modelReference is null)
             {
-                diagnostics.Add(new MapDiagnostic(
+                diagnostics.Report(
                     MapDiagnosticSeverity.Warning,
                     "The [model] block has no parameter, so no model file is named.",
                     scoPath,
-                    modelBlock.LineNumber));
+                    modelBlock.LineNumber);
             }
             else if (LooksLikeConfigurationFile(modelReference))
             {
-                SceneryPathResult resolution = SceneryPath.Resolve(
-                    assetDirectory,
+                SceneryPathResult resolution = SceneryPath.ResolveRelative(
+                    contentRoot,
+                    scoDirectory,
                     modelReference);
 
                 if (resolution.IsResolved)
@@ -173,47 +192,48 @@ internal static class SceneryDefinitionParser
                 }
                 else
                 {
-                    diagnostics.Add(new MapDiagnostic(
+                    diagnostics.Report(
                         MapDiagnosticSeverity.Error,
                         "The [model] reference '" + modelReference +
                         "' could not be resolved: " + (resolution.Error ?? "unknown reason") +
                         " The definition names a separate model configuration, so no " +
                         "geometry is available without it.",
                         scoPath,
-                        modelBlock.LineNumber));
+                        modelBlock.LineNumber);
                 }
+            }
+            else if (IsSupportedMeshReference(modelReference))
+            {
+                // The documented grammar also allows [model] to name the mesh directly
+                // instead of a further configuration file.
+                inlineModelMesh = modelReference;
+                inlineModelLine = modelBlock.LineNumber;
             }
             else
             {
-                diagnostics.Add(new MapDiagnostic(
+                diagnostics.Report(
                     MapDiagnosticSeverity.Warning,
                     "The [model] parameter '" + modelReference + "' is neither an " +
-                    "existing model configuration nor a mesh path, so it is not " +
-                    "interpreted.",
+                    "existing model configuration nor a decodable mesh path, so it is " +
+                    "not interpreted.",
                     scoPath,
-                    modelBlock.LineNumber));
+                    modelBlock.LineNumber);
             }
-        }
-        else
-        {
-            diagnostics.Add(new MapDiagnostic(
-                MapDiagnosticSeverity.Warning,
-                "The definition has no [model] block. Inline [mesh] blocks are used " +
-                "when present.",
-                scoPath));
         }
 
         IReadOnlyList<KeywordBlock> meshBlocks = blocks;
 
-        if (!usesExternalModelConfig && !HasBlock(blocks, "mesh"))
+        if (!usesExternalModelConfig &&
+            inlineModelMesh is null &&
+            !HasBlock(blocks, "mesh"))
         {
-            diagnostics.Add(new MapDiagnostic(
+            diagnostics.Report(
                 MapDiagnosticSeverity.Error,
-                "The definition names no model configuration and has no inline [mesh] " +
-                "block, so it describes no geometry.",
-                scoPath));
+                "The definition names no model configuration, no model mesh, and no " +
+                "inline [mesh] block, so it describes no geometry.",
+                scoPath);
 
-            return new SceneryParseResult(null, diagnostics);
+            return new SceneryParseResult(null, diagnostics.Diagnostics);
         }
 
         if (usesExternalModelConfig)
@@ -225,7 +245,7 @@ internal static class SceneryDefinitionParser
 
             if (readFailed)
             {
-                return new SceneryParseResult(null, diagnostics);
+                return new SceneryParseResult(null, diagnostics.Diagnostics);
             }
 
             foreach (KeywordBlock block in meshBlocks)
@@ -245,6 +265,25 @@ internal static class SceneryDefinitionParser
         int skippedMeshes = 0;
         int skippedTextures = 0;
 
+        if (inlineModelMesh is not null)
+        {
+            if (meshes.Count >= MaxMeshes)
+            {
+                skippedMeshes++;
+            }
+            else
+            {
+                meshes.Add(ResolveMesh(
+                    contentRoot,
+                    scoDirectory,
+                    assetDirectory,
+                    inlineModelMesh,
+                    scoPath,
+                    inlineModelLine,
+                    diagnostics));
+            }
+        }
+
         foreach (KeywordBlock block in meshBlocks)
         {
             if (block.Keyword.Equals("mesh", StringComparison.OrdinalIgnoreCase))
@@ -253,11 +292,11 @@ internal static class SceneryDefinitionParser
 
                 if (meshReference is null)
                 {
-                    diagnostics.Add(new MapDiagnostic(
+                    diagnostics.Report(
                         MapDiagnosticSeverity.Warning,
                         "The [mesh] block has no parameter, so no mesh is named.",
                         scoPath,
-                        block.LineNumber));
+                        block.LineNumber);
                     continue;
                 }
 
@@ -269,6 +308,7 @@ internal static class SceneryDefinitionParser
 
                 meshes.Add(ResolveMesh(
                     contentRoot,
+                    scoDirectory,
                     assetDirectory,
                     meshReference,
                     scoPath,
@@ -294,6 +334,7 @@ internal static class SceneryDefinitionParser
 
                 textures.Add(ResolveTexture(
                     contentRoot,
+                    scoDirectory,
                     assetDirectory,
                     textureReference));
             }
@@ -301,42 +342,43 @@ internal static class SceneryDefinitionParser
 
         if (skippedMeshes > 0)
         {
-            diagnostics.Add(new MapDiagnostic(
+            diagnostics.Report(
                 MapDiagnosticSeverity.Warning,
                 string.Format(
                     CultureInfo.InvariantCulture,
                     "{0} [mesh] block(s) beyond the {1}-mesh limit were not read.",
                     skippedMeshes,
                     MaxMeshes),
-                scoPath));
+                scoPath);
         }
 
         if (skippedTextures > 0)
         {
-            diagnostics.Add(new MapDiagnostic(
+            diagnostics.Report(
                 MapDiagnosticSeverity.Warning,
                 string.Format(
                     CultureInfo.InvariantCulture,
                     "{0} [matl] block(s) beyond the {1}-texture limit were not read.",
                     skippedTextures,
                     MaxTextures),
-                scoPath));
+                scoPath);
         }
 
         if (meshes.Count == 0)
         {
-            diagnostics.Add(new MapDiagnostic(
+            diagnostics.Report(
                 MapDiagnosticSeverity.Error,
                 "No [mesh] block named a mesh file, so the definition describes no " +
                 "geometry.",
-                scoPath));
+                scoPath);
 
-            return new SceneryParseResult(null, diagnostics);
+            return new SceneryParseResult(null, diagnostics.Diagnostics);
         }
 
         var definition = new SceneryDefinition(
             reference,
             scoPath,
+            scoDirectory,
             assetDirectory,
             modelConfigPath,
             usesExternalModelConfig,
@@ -345,45 +387,61 @@ internal static class SceneryDefinitionParser
             textures,
             unsupported.Names(MaxReportedUnsupportedKeywords),
             unsupported.Count,
-            diagnostics);
+            diagnostics.Diagnostics);
 
-        return new SceneryParseResult(definition, diagnostics);
+        return new SceneryParseResult(definition, diagnostics.Diagnostics);
     }
 
     /// <summary>
-    /// Resolves one mesh reference against the model folder and then the content root.
+    /// Resolves one mesh reference against the documented model locations and then the
+    /// content root.
     /// </summary>
     private static SceneryMeshReference ResolveMesh(
         string contentRoot,
+        string scoDirectory,
         string assetDirectory,
         string reference,
         string sourcePath,
         int lineNumber,
-        List<MapDiagnostic> diagnostics)
+        SceneryDiagnostics diagnostics)
     {
-        string extension = Path.GetExtension(reference);
-
-        if (!SupportedMeshExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+        if (!SceneryPath.TryNormalize(reference, out _, out string? referenceError))
         {
+            string rejected =
+                "The mesh '" + reference + "' could not be resolved: " + referenceError;
+
+            diagnostics.Report(
+                MapDiagnosticSeverity.Warning,
+                rejected,
+                sourcePath,
+                lineNumber);
+
+            return new SceneryMeshReference(reference, null, rejected);
+        }
+
+        if (!IsSupportedMeshReference(reference))
+        {
+            string extension = Path.GetExtension(reference);
             string message =
                 "The mesh '" + reference + "' has the extension '" + extension +
                 "', which this build does not decode. Supported mesh extensions are " +
                 string.Join(", ", SupportedMeshExtensions) + ".";
 
-            diagnostics.Add(new MapDiagnostic(
+            diagnostics.Report(
                 MapDiagnosticSeverity.Warning,
                 message,
                 sourcePath,
-                lineNumber));
+                lineNumber);
 
             return new SceneryMeshReference(reference, null, message);
         }
 
         SceneryPathResult resolution = ResolveAsset(
             contentRoot,
+            scoDirectory,
             assetDirectory,
             reference,
-            extraFolder: null);
+            SceneryAssetKind.Mesh);
 
         if (!resolution.IsResolved)
         {
@@ -391,73 +449,233 @@ internal static class SceneryDefinitionParser
                 "The mesh '" + reference + "' could not be resolved: " +
                 (resolution.Error ?? "unknown reason");
 
-            diagnostics.Add(new MapDiagnostic(
+            diagnostics.Report(
                 MapDiagnosticSeverity.Warning,
                 message,
                 sourcePath,
-                lineNumber));
+                lineNumber);
         }
 
         return new SceneryMeshReference(reference, resolution.Path, resolution.Error);
     }
 
     /// <summary>
-    /// Resolves one texture reference. Textures are optional: a mesh subset with a
-    /// missing texture still draws with its base color, so this records the failure
-    /// without a diagnostic of its own.
+    /// Resolves one texture reference against the documented texture locations. Textures
+    /// are optional: a mesh subset with a missing texture still draws with its base
+    /// color, so the failure is carried on the reference and is reported only when a
+    /// drawn subset actually needs it.
     /// </summary>
     private static SceneryTextureReference ResolveTexture(
         string contentRoot,
+        string scoDirectory,
         string assetDirectory,
         string reference)
     {
         SceneryPathResult resolution = ResolveAsset(
             contentRoot,
+            scoDirectory,
             assetDirectory,
             reference,
-            extraFolder: "Texture");
+            SceneryAssetKind.Texture);
 
         return new SceneryTextureReference(reference, resolution.Path, resolution.Error);
     }
 
     /// <summary>
-    /// Tries the model folder, then the content root, then an optional shared folder
-    /// under the content root. The first existing file wins.
+    /// Tries the documented asset locations in order and returns the first existing
+    /// file.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Meshes are looked for beside the configuration file, in its <c>model</c>
+    /// subfolder, in the definition's <c>model</c> subfolder, beside the definition, and
+    /// finally at the content root. Textures use the same idea with the documented
+    /// <c>texture</c> subfolders and the installation-wide <c>Texture</c> folder.
+    /// </para>
+    /// <para>
+    /// Only those explicit folders are inspected; there is no recursive search. Every
+    /// candidate is resolved through <see cref="SceneryPath.ResolveRelative(string,
+    /// string, string)"/>, so a reference that climbs above the content root is rejected
+    /// rather than repaired.
+    /// </para>
+    /// <para>
+    /// A texture with no extension preference is first tried as <c>.dds</c> in each
+    /// folder, because OMSI prefers the DDS variant when both files exist.
+    /// </para>
+    /// </remarks>
+    /// <param name="contentRoot">The installation root that bounds every candidate.</param>
+    /// <param name="scoDirectory">The folder of the <c>.sco</c> definition.</param>
+    /// <param name="assetDirectory">
+    /// The folder of the model configuration, or the <c>.sco</c> folder for an inline
+    /// model.
+    /// </param>
+    /// <param name="reference">The reference exactly as written.</param>
+    /// <param name="kind">Whether the reference names a mesh or a texture.</param>
+    /// <returns>The resolution outcome; it never throws for absent or invalid input.</returns>
     internal static SceneryPathResult ResolveAsset(
         string contentRoot,
+        string scoDirectory,
         string assetDirectory,
         string reference,
-        string? extraFolder)
+        SceneryAssetKind kind)
     {
-        SceneryPathResult local = SceneryPath.Resolve(assetDirectory, reference);
+        ArgumentNullException.ThrowIfNull(contentRoot);
+        ArgumentNullException.ThrowIfNull(scoDirectory);
+        ArgumentNullException.ThrowIfNull(assetDirectory);
+        ArgumentNullException.ThrowIfNull(reference);
 
-        if (local.IsResolved || local.Status == SceneryPathStatus.Rejected)
+        if (!SceneryPath.TryNormalize(reference, out _, out string? error))
         {
-            return local;
+            return new SceneryPathResult(
+                SceneryPathStatus.Rejected,
+                null,
+                reference,
+                error);
         }
 
-        SceneryPathResult installation = SceneryPath.Resolve(contentRoot, reference);
+        List<string> candidates = CandidateDirectories(
+            contentRoot,
+            scoDirectory,
+            assetDirectory,
+            kind);
 
-        if (installation.IsResolved || installation.Status == SceneryPathStatus.Rejected)
-        {
-            return installation;
-        }
+        var searched = new List<string>(candidates.Count);
 
-        if (extraFolder is not null)
+        foreach (string directory in candidates)
         {
-            SceneryPathResult shared = SceneryPath.Resolve(
-                Path.Combine(contentRoot, extraFolder),
+            if (!Directory.Exists(directory))
+            {
+                continue;
+            }
+
+            searched.Add(directory);
+
+            if (kind == SceneryAssetKind.Texture)
+            {
+                SceneryPathResult? preferred = TryDdsVariant(contentRoot, directory, reference);
+
+                if (preferred is SceneryPathResult dds)
+                {
+                    if (dds.IsResolved || dds.Status == SceneryPathStatus.Rejected)
+                    {
+                        return dds;
+                    }
+                }
+            }
+
+            SceneryPathResult resolution = SceneryPath.ResolveRelative(
+                contentRoot,
+                directory,
                 reference);
 
-            if (shared.IsResolved)
+            if (resolution.IsResolved || resolution.Status == SceneryPathStatus.Rejected)
             {
-                return shared;
+                return resolution;
             }
         }
 
-        // Report the model-folder failure, which is where OMSI looks first.
-        return local;
+        string folders = searched.Count == 0
+            ? "no candidate folder exists"
+            : string.Join("; ", searched);
+
+        return new SceneryPathResult(
+            SceneryPathStatus.NotFound,
+            null,
+            reference,
+            $"'{reference}' was not found in any permitted asset folder ({folders}).");
+    }
+
+    /// <summary>
+    /// Builds the documented search folders in order, without duplicates.
+    /// </summary>
+    private static List<string> CandidateDirectories(
+        string contentRoot,
+        string scoDirectory,
+        string assetDirectory,
+        SceneryAssetKind kind)
+    {
+        var candidates = new List<string>(8);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(string directory)
+        {
+            if (seen.Add(Path.GetFullPath(directory)))
+            {
+                candidates.Add(directory);
+            }
+        }
+
+        if (kind == SceneryAssetKind.Mesh)
+        {
+            Add(assetDirectory);
+            Add(Path.Combine(assetDirectory, "model"));
+            Add(Path.Combine(scoDirectory, "model"));
+            Add(scoDirectory);
+        }
+        else
+        {
+            Add(assetDirectory);
+            Add(Path.Combine(assetDirectory, "texture"));
+            Add(scoDirectory);
+            Add(Path.Combine(scoDirectory, "texture"));
+        }
+
+        Add(contentRoot);
+
+        if (kind == SceneryAssetKind.Texture)
+        {
+            Add(Path.Combine(contentRoot, "Texture"));
+        }
+
+        return candidates;
+    }
+
+    /// <summary>
+    /// Resolves the <c>.dds</c> spelling of a texture reference when the reference names
+    /// another extension.
+    /// </summary>
+    /// <returns>
+    /// The DDS outcome when it is resolved or rejected, or <see langword="null"/> when
+    /// the DDS spelling does not exist and the caller should try the declared name.
+    /// </returns>
+    private static SceneryPathResult? TryDdsVariant(
+        string contentRoot,
+        string directory,
+        string reference)
+    {
+        string extension = Path.GetExtension(reference);
+
+        if (string.IsNullOrEmpty(extension) ||
+            extension.Equals(".dds", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        string preferred = Path.ChangeExtension(reference, ".dds");
+
+        if (string.Equals(preferred, reference, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        SceneryPathResult resolution = SceneryPath.ResolveRelative(
+            contentRoot,
+            directory,
+            preferred);
+
+        return resolution.IsResolved || resolution.Status == SceneryPathStatus.Rejected
+            ? resolution
+            : null;
+    }
+
+    /// <summary>
+    /// Tests whether a mesh reference has a file extension this build can decode.
+    /// </summary>
+    private static bool IsSupportedMeshReference(string reference)
+    {
+        return SupportedMeshExtensions.Contains(
+            Path.GetExtension(reference),
+            StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -466,14 +684,14 @@ internal static class SceneryDefinitionParser
     /// </summary>
     private static IReadOnlyList<KeywordBlock> ReadBlocks(
         string path,
-        List<MapDiagnostic> diagnostics,
+        SceneryDiagnostics diagnostics,
         out bool failed)
     {
         failed = false;
 
         ConfigReadResult read = ConfigTextReader.Read(path, MaxConfigBytes, MaxConfigLines);
 
-        diagnostics.AddRange(read.Diagnostics);
+        diagnostics.ReportRange(read.Diagnostics);
 
         if (read.Text is null)
         {
@@ -481,7 +699,7 @@ internal static class SceneryDefinitionParser
 
             if (read.FatalError is not null)
             {
-                diagnostics.Add(read.FatalError);
+                diagnostics.Report(read.FatalError);
             }
 
             return [];
@@ -489,7 +707,15 @@ internal static class SceneryDefinitionParser
 
         ConfigText filtered = RemoveSwitchedOffLines(read.Text);
 
-        return KeywordBlockReader.Read(filtered, path, diagnostics);
+        var blockDiagnostics = new List<MapDiagnostic>();
+        IReadOnlyList<KeywordBlock> blocks = KeywordBlockReader.Read(
+            filtered,
+            path,
+            blockDiagnostics);
+
+        diagnostics.ReportRange(blockDiagnostics);
+
+        return blocks;
     }
 
     /// <summary>

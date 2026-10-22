@@ -9,8 +9,8 @@ internal enum SceneryPathStatus
     Resolved,
 
     /// <summary>
-    /// The reference is not an acceptable relative content path, so it was rejected
-    /// before touching the filesystem.
+    /// The reference is not an acceptable relative content path, or it would leave
+    /// the permitted asset root, so it was rejected before touching the filesystem.
     /// </summary>
     Rejected,
 
@@ -50,12 +50,18 @@ internal readonly record struct SceneryPathResult(
 /// macOS without weakening the check.
 /// </para>
 /// <para>
-/// Nothing here guesses: a reference that is absolute, drive-qualified, contains a
-/// <c>.</c> or <c>..</c> component, an empty component, a control character, or a
-/// Windows alternate-data-stream separator is rejected rather than repaired. Because
-/// only normalized components are ever combined with a directory, and each combined
-/// path is required to stay under the root, a resolved file cannot escape the
-/// authorized content tree.
+/// OMSI content also uses <c>..</c> deliberately: an object may point at a mesh in a
+/// sibling collection, for example
+/// <c>..\..\Kreuz_MC\model\Einm_altonaer.o3d</c>. Such a reference is accepted as
+/// long as the normalized result stays below the permitted content root. A reference
+/// that is absolute, drive-qualified, has an empty component, a control character, a
+/// colon inside a component, or that would climb above the root is rejected rather
+/// than repaired.
+/// </para>
+/// <para>
+/// Because only normalized components are combined with a directory, and each
+/// combined path is required to stay under the root, a resolved file cannot escape
+/// the authorized content tree.
 /// </para>
 /// <para>
 /// This type performs file-system lookups only. It creates no GPU resource and reads
@@ -82,6 +88,11 @@ internal static class SceneryPath
     /// <summary>
     /// Normalizes a reference into its components.
     /// </summary>
+    /// <remarks>
+    /// <c>.</c> components are dropped. <c>..</c> components are kept for the caller,
+    /// which must combine them with a base directory and prove that the result stays
+    /// inside the content root; a reference on its own cannot show that.
+    /// </remarks>
     /// <param name="reference">The reference exactly as written in the source file.</param>
     /// <param name="segments">The normalized components, or empty on rejection.</param>
     /// <param name="error">A readable explanation when the reference is rejected.</param>
@@ -148,12 +159,9 @@ internal static class SceneryPath
                 return false;
             }
 
-            if (part == "." || part == "..")
+            if (part == ".")
             {
-                error =
-                    $"The reference contains the relative component '{part}', " +
-                    "which could leave the content root.";
-                return false;
+                continue;
             }
 
             if (part.Contains(':', StringComparison.Ordinal))
@@ -181,17 +189,37 @@ internal static class SceneryPath
     }
 
     /// <summary>
-    /// Resolves a reference to an existing file under a content root.
+    /// Resolves a reference relative to the content root.
     /// </summary>
-    /// <param name="root">
-    /// The existing directory that bounds every resolution, normally the OMSI
-    /// installation root or a model's own folder.
-    /// </param>
+    /// <param name="root">The existing directory that bounds every resolution.</param>
     /// <param name="reference">The reference exactly as written in the source file.</param>
     /// <returns>The resolution outcome; it never throws for absent or invalid input.</returns>
     internal static SceneryPathResult Resolve(string root, string reference)
     {
+        return ResolveRelative(root, root, reference);
+    }
+
+    /// <summary>
+    /// Resolves a reference relative to a base directory that must stay under the
+    /// content root.
+    /// </summary>
+    /// <param name="root">
+    /// The existing directory that bounds the result, normally the OMSI installation
+    /// root.
+    /// </param>
+    /// <param name="baseDirectory">
+    /// The directory the reference is written relative to, normally the folder of the
+    /// configuration file that contains it.
+    /// </param>
+    /// <param name="reference">The reference exactly as written in the source file.</param>
+    /// <returns>The resolution outcome; it never throws for absent or invalid input.</returns>
+    internal static SceneryPathResult ResolveRelative(
+        string root,
+        string baseDirectory,
+        string reference)
+    {
         ArgumentNullException.ThrowIfNull(root);
+        ArgumentNullException.ThrowIfNull(baseDirectory);
 
         if (!TryNormalize(reference, out string[] segments, out string? error))
         {
@@ -208,12 +236,56 @@ internal static class SceneryPath
                 SceneryPathStatus.NotFound,
                 null,
                 reference,
-                $"The folder '{root}' does not exist.");
+                $"The root folder '{root}' does not exist.");
         }
 
-        string current = root;
+        string fullRoot = Path.GetFullPath(root);
+        string fullBase = Path.GetFullPath(baseDirectory);
+
+        if (!TryGetBaseSegments(fullRoot, fullBase, out List<string> combined, out error))
+        {
+            return new SceneryPathResult(
+                SceneryPathStatus.Rejected,
+                null,
+                reference,
+                error);
+        }
 
         foreach (string segment in segments)
+        {
+            if (segment == "..")
+            {
+                if (combined.Count == 0)
+                {
+                    return new SceneryPathResult(
+                        SceneryPathStatus.Rejected,
+                        null,
+                        reference,
+                        $"The reference '{reference}' climbs above the permitted " +
+                        $"content root '{root}'.");
+                }
+
+                combined.RemoveAt(combined.Count - 1);
+                continue;
+            }
+
+            if (combined.Count >= MaxSegmentCount)
+            {
+                return new SceneryPathResult(
+                    SceneryPathStatus.Rejected,
+                    null,
+                    reference,
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"The resolved reference has more than {MaxSegmentCount} components."));
+            }
+
+            combined.Add(segment);
+        }
+
+        string current = fullRoot;
+
+        foreach (string segment in combined)
         {
             if (!TryResolveSegment(current, segment, out string? resolved, out error))
             {
@@ -234,6 +306,47 @@ internal static class SceneryPath
                 null,
                 reference,
                 $"'{reference}' resolved to '{current}', which is not a file.");
+    }
+
+    /// <summary>
+    /// Computes the components of a base directory relative to the content root.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when the base directory is the root itself or a
+    /// directory below it.
+    /// </returns>
+    private static bool TryGetBaseSegments(
+        string fullRoot,
+        string fullBase,
+        out List<string> segments,
+        out string? error)
+    {
+        segments = [];
+        error = null;
+
+        string relative = Path.GetRelativePath(fullRoot, fullBase);
+
+        if (relative == ".")
+        {
+            return true;
+        }
+
+        if (Path.IsPathRooted(relative) ||
+            relative == ".." ||
+            relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
+            relative.StartsWith("../", StringComparison.Ordinal))
+        {
+            error =
+                $"The folder '{fullBase}' is not below the permitted content root " +
+                $"'{fullRoot}'.";
+            return false;
+        }
+
+        segments = [.. relative.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries)];
+
+        return true;
     }
 
     /// <summary>

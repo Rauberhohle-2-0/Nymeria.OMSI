@@ -114,7 +114,7 @@ Notes:
 - Builds are warning-free by policy: `TreatWarningsAsErrors` is enabled in
   [Directory.Build.props](../Directory.Build.props) for this repository's
   projects, and the engine keeps its own settings.
-- The test project runs 256 headless tests. They cover command-line parsing, the
+- The test project runs 268 headless tests. They cover command-line parsing, the
   GPU-free map metadata layer (text encoding selection and fallbacks, keyword-block
   tokenizing, tile file-name parsing, discovery ordering, duplicates, unsupported
   directives, summary output), the GPU-free tile/world layer (record layouts by
@@ -129,11 +129,14 @@ Notes:
   counter-clockwise winding, 5 m spacing, elevation transfer, normals, tile-edge
   continuity, merged index offsets, the vertex layout, the colour ramp, camera
   framing and frame-rate independence, and the embedded Metal shader resource), and
-  the GPU-free scenery layer (path normalization and traversal rejection,
-  case-insensitive resolution, the `[model]`/`[mesh]`/`[matl]`/`[absheight]` subset,
-  switch-off markers and comment lines, unsupported-keyword counting, placement
-  transforms and their sign conventions, bilinear terrain height sampling, and
-  loading with caching, counted skips, and a synthetic `.x` mesh and bitmap fixture).
+  the GPU-free scenery layer (path normalization, bounded `..` traversal, rejection of
+  paths that leave the content root, case-insensitive resolution, inline
+  `[mesh]` without a `[model]` block, the documented `model`/`texture` folder search
+  order, `.dds` texture preference, the `[model]`/`[mesh]`/`[matl]`/`[absheight]`
+  subset, switch-off markers and comment lines, unsupported-keyword counting, placement
+  transforms and their sign conventions, bilinear terrain height sampling, and loading
+  with positive and negative caching, deduplicated diagnostics, counted skips, and a
+  synthetic `.x` mesh and bitmap fixture).
   They create no window, no GPU device, and no audio device, and they use only
   synthetic strings and byte arrays written by the tests.
 - The host itself, including `--map`, `--world`, `--render`, `--terrain-3d`, and
@@ -199,7 +202,7 @@ dotnet format Nymeria.OMSI.slnx --verify-no-changes --no-restore
 | `--terrain-3d` reports `terrain: not started — no tile produced a decoded height grid` | Every sidecar was missing or rejected. The terrain diagnostics name each file and the reason; a file of another size or header is a finding to report, not something to work around. |
 | `--terrain-3d` reports rejected sidecars | The decoder only accepts the documented `u32 (=60)` + 61 x 61 `f32` layout. Report the file size, the header value, and the diagnostic rather than editing the map. |
 | `--scene-3d` reports `content root: (not derived)` | The map folder is not inside a folder named `maps`, so nothing can be resolved. Point `--map` at the map folder inside the installation, not at a copy elsewhere. |
-| `--scene-3d` reports many unresolved references | The derived root is wrong or the map was copied without its `Sceneryobjects` folder. The diagnostics name the reference and the folder that was searched. |
+| `--scene-3d` reports many unresolved references | The derived root is wrong or the map was copied without its `Sceneryobjects` folder. The diagnostics name the reference and every documented folder that was searched. A message that mentions `climbs above` means the reference itself is unsafe, not that an asset is missing. |
 | `--scene-3d` reports `scene: not started — no scenery placement could be loaded` | Every placement failed to resolve, parse, decode, or place. The counted summary separates unresolved references, definitions without drawable geometry, missing terrain, and invalid transforms; `--terrain-3d` still works. |
 | Objects float, sink, or are rotated oddly | Height semantics, the axis change, and the pitch/bank convention are three separate, documented expressions. Record which object, the tile, and how it is wrong before changing anything. |
 | The terrain window is black or empty | Check the console's `engine:` line and any error. A black frame with `geometry:` reporting triangles is a GPU-side finding: report the driver line, depth format availability, window size, and whether the window was resized. |

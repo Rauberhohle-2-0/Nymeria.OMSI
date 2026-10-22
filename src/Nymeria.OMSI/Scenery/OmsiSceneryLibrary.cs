@@ -24,9 +24,10 @@ namespace Nymeria.Omsi.Scenery;
 /// anything and is testable headlessly.
 /// </para>
 /// <para>
-/// Everything is cached by resolved path. Twenty instances of one building share one
-/// parsed definition, one decoded mesh, one decoded texture, and later one set of GPU
-/// buffers. Nothing is decoded per frame.
+/// Everything is cached by resolved path, including a failed definition. Twenty
+/// instances of one building share one parsed definition, one decoded mesh, one decoded
+/// texture, and later one set of GPU buffers, and a damaged definition is parsed once
+/// instead of once per placement. Nothing is decoded per frame.
 /// </para>
 /// <para>
 /// The scene is a documented partial scene, not a claim about OMSI compatibility.
@@ -60,8 +61,8 @@ internal sealed class OmsiSceneryLibrary
     internal const int MaxVertices = 4_000_000;
 
     /// <summary>
-    /// The largest number of individual problem diagnostics recorded. Further problems
-    /// are only counted.
+    /// The largest number of distinct problem diagnostics recorded. Repeated messages
+    /// and further distinct problems are only counted.
     /// </summary>
     internal const int MaxReportedProblems = 40;
 
@@ -113,19 +114,17 @@ internal sealed class OmsiSceneryLibrary
     {
         ArgumentNullException.ThrowIfNull(world);
 
-        var diagnostics = new List<MapDiagnostic>();
-        var reporter = new ProblemReporter(diagnostics);
+        var diagnostics = new SceneryDiagnostics(MaxReportedProblems);
         var instances = new List<SceneryInstance>();
-        var models = new Dictionary<string, SceneryModel>(StringComparer.OrdinalIgnoreCase);
+
+        // A null value is a cached parse failure: the same damaged .sco is parsed once,
+        // no matter how many placements reference it.
+        var models = new Dictionary<string, SceneryModel?>(StringComparer.OrdinalIgnoreCase);
         var loadedModels = new List<SceneryModel>();
         var meshFiles = new Dictionary<string, IReadOnlyList<SceneryMesh>>(
             StringComparer.OrdinalIgnoreCase);
         var textures = new Dictionary<string, Texture?>(StringComparer.OrdinalIgnoreCase);
-        var cache = new LoadCache(
-            meshFiles,
-            textures,
-            diagnostics,
-            reporter);
+        var cache = new LoadCache(meshFiles, textures, diagnostics);
 
         int considered = 0;
         int resolvedDefinitions = 0;
@@ -139,26 +138,26 @@ internal sealed class OmsiSceneryLibrary
 
         if (contentRoot is null)
         {
-            diagnostics.Add(new MapDiagnostic(
+            diagnostics.Report(
                 MapDiagnosticSeverity.Warning,
                 "The OMSI installation root could not be derived from the map folder, " +
                 "so no scenery reference can be resolved and no object is loaded. The " +
-                "map folder must be inside a folder named 'maps'."));
+                "map folder must be inside a folder named 'maps'.");
 
             return new OmsiSceneryLibrary(
                 [],
                 [],
-                diagnostics,
+                diagnostics.Diagnostics,
                 new SceneryLoadCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
         }
 
         if (terrain is null)
         {
-            diagnostics.Add(new MapDiagnostic(
+            diagnostics.Report(
                 MapDiagnosticSeverity.Warning,
                 "No terrain was decoded, so every object whose height is " +
                 "terrain-relative is skipped instead of being placed at an invented " +
-                "height. Objects that declare [absheight] are still placed."));
+                "height. Objects that declare [absheight] are still placed.");
         }
 
         bool stopped = false;
@@ -178,14 +177,14 @@ internal sealed class OmsiSceneryLibrary
 
                     if (instances.Count == MaxInstances)
                     {
-                        diagnostics.Add(new MapDiagnostic(
+                        diagnostics.Report(
                             MapDiagnosticSeverity.Warning,
                             string.Format(
                                 CultureInfo.InvariantCulture,
                                 "The scene view draws at most {0} placements. Later " +
                                 "placements are not loaded, so this is a deliberately " +
                                 "partial scene.",
-                                MaxInstances)));
+                                MaxInstances));
                     }
 
                     continue;
@@ -205,7 +204,7 @@ internal sealed class OmsiSceneryLibrary
                 if (!reference.IsResolved)
                 {
                     unresolvedReferences++;
-                    reporter.Report(
+                    diagnostics.Report(
                         MapDiagnosticSeverity.Warning,
                         "The scenery reference '" + placement.ModelPath +
                         "' could not be resolved: " + (reference.Error ?? "unknown reason"),
@@ -232,14 +231,21 @@ internal sealed class OmsiSceneryLibrary
                         cache,
                         ref vertices);
 
-                    if (model is null)
-                    {
-                        definitionFailures++;
-                        continue;
-                    }
-
                     models.Add(scoPath, model);
-                    loadedModels.Add(model);
+
+                    if (model is not null)
+                    {
+                        loadedModels.Add(model);
+                    }
+                }
+
+                // A cached failure is still a failure for this placement: the count
+                // says how many placements were not drawn, while the parse happened
+                // once and its diagnostics were listed once.
+                if (model is null)
+                {
+                    definitionFailures++;
+                    continue;
                 }
 
                 resolvedDefinitions++;
@@ -279,7 +285,7 @@ internal sealed class OmsiSceneryLibrary
                         transformFailures++;
                     }
 
-                    reporter.Report(
+                    diagnostics.Report(
                         MapDiagnosticSeverity.Warning,
                         "The placement of '" + placement.ModelPath + "' is skipped: " +
                         (transformError ?? "the transform could not be computed."),
@@ -299,37 +305,39 @@ internal sealed class OmsiSceneryLibrary
 
         if (skippedByModelLimit > 0)
         {
-            diagnostics.Add(new MapDiagnostic(
+            diagnostics.Report(
                 MapDiagnosticSeverity.Warning,
                 string.Format(
                     CultureInfo.InvariantCulture,
                     "The scene view loads at most {0} distinct scenery definitions. " +
                     "{1} further placement(s) were not attempted.",
                     MaxUniqueModels,
-                    skippedByModelLimit)));
+                    skippedByModelLimit));
         }
 
         if (skippedByLimit > 0)
         {
-            diagnostics.Add(new MapDiagnostic(
+            diagnostics.Report(
                 MapDiagnosticSeverity.Warning,
                 string.Format(
                     CultureInfo.InvariantCulture,
                     "{0} placement(s) beyond the {1}-instance scene limit were not " +
                     "loaded.",
                     skippedByLimit,
-                    MaxInstances)));
+                    MaxInstances));
         }
 
-        if (reporter.Suppressed > 0)
+        int suppressed = diagnostics.Suppressed;
+
+        if (suppressed > 0)
         {
-            diagnostics.Add(new MapDiagnostic(
+            diagnostics.AddNote(new MapDiagnostic(
                 MapDiagnosticSeverity.Warning,
                 string.Format(
                     CultureInfo.InvariantCulture,
                     "{0} further problem(s) of the kinds already reported were counted " +
                     "but not listed.",
-                    reporter.Suppressed)));
+                    suppressed)));
         }
 
         var counts = new SceneryLoadCounts(
@@ -348,9 +356,9 @@ internal sealed class OmsiSceneryLibrary
             vertices,
             loadedModels.Sum(model => model.Subsets.Count),
             cache.UnsupportedKeywordCount,
-            reporter.Suppressed);
+            suppressed);
 
-        return new OmsiSceneryLibrary(instances, loadedModels, diagnostics, counts);
+        return new OmsiSceneryLibrary(instances, loadedModels, diagnostics.Diagnostics, counts);
     }
 
     /// <summary>
@@ -369,10 +377,7 @@ internal sealed class OmsiSceneryLibrary
             reference,
             contentRoot);
 
-        foreach (MapDiagnostic diagnostic in parsed.Diagnostics)
-        {
-            cache.Diagnostics.Add(diagnostic);
-        }
+        cache.Diagnostics.ReportRange(parsed.Diagnostics);
 
         if (parsed.Definition is not SceneryDefinition definition)
         {
@@ -432,11 +437,11 @@ internal sealed class OmsiSceneryLibrary
 
         if (subsets.Count == 0 || bounds is null)
         {
-            cache.Diagnostics.Add(new MapDiagnostic(
+            cache.Diagnostics.Report(
                 MapDiagnosticSeverity.Warning,
                 "No mesh of this definition could be decoded, so the object is not " +
                 "drawn.",
-                scoPath));
+                scoPath);
 
             return null;
         }
@@ -458,21 +463,18 @@ internal sealed class OmsiSceneryLibrary
         private readonly Dictionary<string, Texture?> _textures;
         private readonly Dictionary<string, Material> _materials =
             new(StringComparer.OrdinalIgnoreCase);
-        private readonly ProblemReporter _reporter;
 
         internal LoadCache(
             Dictionary<string, IReadOnlyList<SceneryMesh>> meshes,
             Dictionary<string, Texture?> textures,
-            List<MapDiagnostic> diagnostics,
-            ProblemReporter reporter)
+            SceneryDiagnostics diagnostics)
         {
             _meshes = meshes;
             _textures = textures;
-            _reporter = reporter;
             Diagnostics = diagnostics;
         }
 
-        internal List<MapDiagnostic> Diagnostics { get; }
+        internal SceneryDiagnostics Diagnostics { get; }
 
         internal int MeshesDecoded { get; private set; }
 
@@ -494,7 +496,7 @@ internal sealed class OmsiSceneryLibrary
 
             if (_meshes.Count >= MaxUniqueMeshes)
             {
-                _reporter.Report(
+                Diagnostics.Report(
                     MapDiagnosticSeverity.Warning,
                     "The scene view decodes at most " + MaxUniqueMeshes +
                     " mesh files; this one is not decoded.",
@@ -520,7 +522,7 @@ internal sealed class OmsiSceneryLibrary
                 UnauthorizedAccessException or NotSupportedException or
                 ArgumentException or InvalidOperationException)
             {
-                _reporter.Report(
+                Diagnostics.Report(
                     MapDiagnosticSeverity.Warning,
                     "The mesh '" + Path.GetFileName(path) +
                     "' could not be decoded: " + exception.Message,
@@ -539,7 +541,7 @@ internal sealed class OmsiSceneryLibrary
 
             if (vertices + added > MaxVertices)
             {
-                _reporter.Report(
+                Diagnostics.Report(
                     MapDiagnosticSeverity.Warning,
                     "The decoded geometry limit of " + MaxVertices +
                     " vertices was reached, so this mesh is not decoded.",
@@ -572,18 +574,20 @@ internal sealed class OmsiSceneryLibrary
         {
             string? texturePath = null;
             string? reference = null;
+            string? resolutionError = null;
 
             if (!string.IsNullOrWhiteSpace(materialName))
             {
                 reference = materialName;
-                string? declared = null;
+                bool declared = false;
 
                 foreach (SceneryTextureReference declaredTexture in definition.Textures)
                 {
                     if (Matches(declaredTexture.Reference, materialName))
                     {
-                        declared = declaredTexture.Reference;
+                        declared = true;
                         texturePath = declaredTexture.Path;
+                        resolutionError = declaredTexture.Error;
                         break;
                     }
                 }
@@ -591,15 +595,17 @@ internal sealed class OmsiSceneryLibrary
                 // A declared [matl] texture wins, including when the file is absent.
                 // A subset with no declaration is resolved by its own name, which is
                 // the name OMSI's own meshes use for a texture file.
-                if (declared is null)
+                if (!declared)
                 {
                     SceneryPathResult resolution = SceneryDefinitionParser.ResolveAsset(
                         contentRoot,
+                        definition.ScoDirectory,
                         definition.AssetDirectory,
                         materialName,
-                        extraFolder: "Texture");
+                        SceneryAssetKind.Texture);
 
                     texturePath = resolution.Path;
+                    resolutionError = resolution.Error;
                 }
             }
 
@@ -609,6 +615,11 @@ internal sealed class OmsiSceneryLibrary
 
             if (_materials.TryGetValue(cacheKey, out Material? cached))
             {
+                if (reference is not null && cached.BaseColorTexture is null)
+                {
+                    TexturesMissing++;
+                }
+
                 return cached;
             }
 
@@ -617,10 +628,21 @@ internal sealed class OmsiSceneryLibrary
                 : LoadTexture(texturePath);
 
             // A subset that names a material but has no usable texture is a reported
-            // limitation; a subset that names none is simply untextured.
-            if (texturePath is null && reference is not null)
+            // limitation; a subset that names none is simply untextured. A decode
+            // failure was already reported by LoadTexture; an unresolved reference is
+            // reported here, once per distinct message.
+            if (texture is null && reference is not null)
             {
                 TexturesMissing++;
+
+                if (texturePath is null)
+                {
+                    Diagnostics.Report(
+                        MapDiagnosticSeverity.Warning,
+                        "The texture '" + reference + "' could not be resolved: " +
+                        (resolutionError ?? "unknown reason") +
+                        " The subset is drawn with its base color.");
+                }
             }
 
             var material = new Material(
@@ -643,7 +665,7 @@ internal sealed class OmsiSceneryLibrary
 
             if (_textures.Count >= MaxUniqueTextures)
             {
-                _reporter.Report(
+                Diagnostics.Report(
                     MapDiagnosticSeverity.Warning,
                     "The scene view decodes at most " + MaxUniqueTextures +
                     " texture files; this one is not decoded.",
@@ -663,7 +685,7 @@ internal sealed class OmsiSceneryLibrary
                 UnauthorizedAccessException or NotSupportedException or
                 ArgumentException or InvalidOperationException)
             {
-                _reporter.Report(
+                Diagnostics.Report(
                     MapDiagnosticSeverity.Warning,
                     "The texture '" + Path.GetFileName(path) +
                     "' could not be decoded: " + exception.Message,
@@ -690,37 +712,6 @@ internal sealed class OmsiSceneryLibrary
         }
     }
 
-    /// <summary>
-    /// Records the first few problems of a kind and counts the rest.
-    /// </summary>
-    private sealed class ProblemReporter
-    {
-        private readonly List<MapDiagnostic> _diagnostics;
-        private int _reported;
-
-        internal ProblemReporter(List<MapDiagnostic> diagnostics)
-        {
-            _diagnostics = diagnostics;
-        }
-
-        internal int Suppressed { get; private set; }
-
-        internal void Report(
-            MapDiagnosticSeverity severity,
-            string message,
-            string? path = null,
-            int? lineNumber = null)
-        {
-            if (_reported >= MaxReportedProblems)
-            {
-                Suppressed++;
-                return;
-            }
-
-            _reported++;
-            _diagnostics.Add(new MapDiagnostic(severity, message, path, lineNumber));
-        }
-    }
 }
 
 /// <summary>
@@ -731,7 +722,7 @@ internal sealed class OmsiSceneryLibrary
 /// <param name="ModelsLoaded">Distinct definitions loaded.</param>
 /// <param name="InstancesResolved">Placements that reused or loaded a model.</param>
 /// <param name="UnresolvedReferences">Placements whose <c>.sco</c> file was not found or was rejected.</param>
-/// <param name="DefinitionFailures">Definitions that parsed but produced no drawable geometry.</param>
+/// <param name="DefinitionFailures">Placements whose cached definition produced no drawable geometry.</param>
 /// <param name="MeshesDecoded">Distinct mesh files decoded.</param>
 /// <param name="TexturesDecoded">Distinct texture files decoded.</param>
 /// <param name="TexturesMissing">Subsets whose texture could not be resolved or decoded.</param>
