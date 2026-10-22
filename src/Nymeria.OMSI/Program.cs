@@ -170,6 +170,15 @@ internal static class Program
 
         OmsiMapPlan plan = OmsiMapPlan.Create(world);
 
+        if (plan.Tiles.Count == 0)
+        {
+            WorldSummaryWriter.Write(Console.Out, world);
+            Console.Error.WriteLine(
+                "render: not started — the map has no discovered tile files, so " +
+                "there is nothing to visualize.");
+            return ExitFailure;
+        }
+
         bool hasContentRoot = OmsiContentRoot.TryDerive(
             world.MapRoot,
             out string? contentRoot,

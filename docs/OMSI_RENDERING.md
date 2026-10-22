@@ -192,6 +192,7 @@ stay available through `--world`.
 | Situation | Behavior |
 | --- | --- |
 | No `global.cfg`, unreadable folder, or no usable world data | The parse summary is printed, `render: not started — the map produced no usable world data.` follows, exit code 1, no window opened |
+| A readable map with no `tile_x_y.map` files | The parse summary is printed, `render: not started — the map has no discovered tile files` follows, exit code 1, no window opened |
 | `.map` tile that cannot be interpreted | That tile is reported and contributes no markers; the rest of the map still renders |
 | Marker count beyond 250,000 per category | Extra markers are omitted and counted in `plan exclusions`, never silently dropped |
 | Non-finite or absurd placement coordinates | That placement is skipped and counted in `plan exclusions` |
