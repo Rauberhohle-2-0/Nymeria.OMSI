@@ -3,38 +3,44 @@ using System.Numerics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Nymeria.Graphics;
+using Nymeria.Omsi.Scenery;
 using Nymeria.Omsi.Terrain;
 using SDL3;
 
 namespace Nymeria.Omsi.Rendering;
 
 /// <summary>
-/// Draws decoded OMSI terrain through the engine's GPU device into one window.
+/// Draws decoded OMSI terrain, and optionally loaded scenery, through the engine's GPU
+/// device into one window.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The device, its backend selection, and the shader-format policy belong to
-/// Nymeria; this type is host-boundary code that records one render pass with the
-/// engine device handle, exactly as the engine's own examples do. It creates no
-/// second renderer and no abstraction over passes or resources.
+/// The device, its backend selection, and the shader-format policy belong to Nymeria;
+/// this type is host-boundary code that records one render pass with the engine device
+/// handle, exactly as the engine's own examples do. It creates no second renderer and
+/// no abstraction over passes or resources.
 /// </para>
 /// <para>
 /// Static terrain geometry is uploaded once: one vertex buffer, one index buffer, one
 /// graphics pipeline, and one depth texture that is recreated only when the drawable
-/// size changes. The camera comes from <see cref="TerrainCameraController"/>; the
-/// only per-frame GPU writes are the view-projection uniform and the draw itself.
+/// size changes. When scenery is supplied, <see cref="SceneryRenderer"/> uploads its
+/// geometry and textures the same way and draws into the same pass, so depth resolves
+/// objects against terrain and against each other. The camera comes from
+/// <see cref="TerrainCameraController"/>; the only per-frame GPU writes are the
+/// matrices and the draws themselves.
 /// </para>
 /// <para>
-/// What the window shows is terrain only. Scenery objects, splines, ground textures,
-/// and water are not part of this view, and the window title and console summary both
-/// say so.
+/// Scenery is optional: <c>--terrain-3d</c> passes none and shows terrain only, while
+/// <c>--scene-3d</c> passes the loaded library. What is not drawn — splines, ground
+/// textures, water, vehicles — is not part of either view, and the window title and the
+/// console summary say so.
 /// </para>
 /// <para>
 /// Every member runs on the process main thread. The window and device must outlive
 /// the presenter.
 /// </para>
 /// </remarks>
-internal sealed class TerrainPresenter : IFramePresenter
+internal sealed class ScenePresenter : IFramePresenter
 {
     /// <summary>
     /// The logical resource-name prefix of the terrain shader family. The engine
@@ -61,6 +67,7 @@ internal sealed class TerrainPresenter : IFramePresenter
     private readonly IntPtr _indexBuffer;
     private readonly IntPtr _pipeline;
     private readonly SDL.GPUTextureFormat _depthFormat;
+    private readonly SceneryRenderer? _scenery;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
 
     private IntPtr _depthTexture;
@@ -70,7 +77,7 @@ internal sealed class TerrainPresenter : IFramePresenter
     private bool _isLooking;
     private bool _disposed;
 
-    private TerrainPresenter(
+    private ScenePresenter(
         IntPtr window,
         GpuDevice device,
         OmsiTerrainModel model,
@@ -80,7 +87,8 @@ internal sealed class TerrainPresenter : IFramePresenter
         IntPtr vertexBuffer,
         IntPtr indexBuffer,
         IntPtr pipeline,
-        SDL.GPUTextureFormat depthFormat)
+        SDL.GPUTextureFormat depthFormat,
+        SceneryRenderer? scenery)
     {
         _window = window;
         _engineDevice = device;
@@ -93,24 +101,31 @@ internal sealed class TerrainPresenter : IFramePresenter
         _indexBuffer = indexBuffer;
         _pipeline = pipeline;
         _depthFormat = depthFormat;
+        _scenery = scenery;
     }
 
     /// <summary>
-    /// Creates the shaders, buffers, depth format, and pipeline for a terrain model.
+    /// Creates the shaders, buffers, depth format, pipeline, and optional scenery
+    /// renderer for a terrain model.
     /// </summary>
     /// <param name="window">The native <c>SDL_Window*</c> handle.</param>
     /// <param name="device">The engine device that claimed the window.</param>
     /// <param name="model">The merged terrain geometry to draw.</param>
+    /// <param name="scenery">
+    /// The loaded scenery to draw over the terrain, or <see langword="null"/> for the
+    /// terrain-only view.
+    /// </param>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">The window handle is zero.</exception>
     /// <exception cref="InvalidOperationException">
     /// The device has no shader asset in its format, the model has no geometry, or GPU
     /// resource creation fails.
     /// </exception>
-    internal static TerrainPresenter Create(
+    internal static ScenePresenter Create(
         IntPtr window,
         GpuDevice device,
-        OmsiTerrainModel model)
+        OmsiTerrainModel model,
+        OmsiSceneryLibrary? scenery = null)
     {
         ArgumentNullException.ThrowIfNull(device);
         ArgumentNullException.ThrowIfNull(model);
@@ -128,7 +143,7 @@ internal sealed class TerrainPresenter : IFramePresenter
                 "The terrain model has no geometry, so there is nothing to draw.");
         }
 
-        Assembly assembly = typeof(TerrainPresenter).Assembly;
+        Assembly assembly = typeof(ScenePresenter).Assembly;
         ShaderProgram program = ShaderProgram.Select(
             ShaderResourcePrefix,
             device.ShaderFormat);
@@ -145,6 +160,7 @@ internal sealed class TerrainPresenter : IFramePresenter
         IntPtr vertexBuffer = IntPtr.Zero;
         IntPtr indexBuffer = IntPtr.Zero;
         IntPtr pipeline = IntPtr.Zero;
+        SceneryRenderer? sceneryRenderer = null;
 
         try
         {
@@ -174,11 +190,20 @@ internal sealed class TerrainPresenter : IFramePresenter
                 device.SwapchainFormat,
                 depthFormat);
 
+            if (scenery is not null && scenery.Instances.Count > 0)
+            {
+                sceneryRenderer = SceneryRenderer.Create(
+                    device,
+                    scenery,
+                    device.SwapchainFormat,
+                    depthFormat);
+            }
+
             var controller = new TerrainCameraController(
                 new Camera(bounds.Center),
                 TerrainCameraFraming.FromBounds(bounds));
 
-            return new TerrainPresenter(
+            return new ScenePresenter(
                 window,
                 device,
                 model,
@@ -188,13 +213,16 @@ internal sealed class TerrainPresenter : IFramePresenter
                 vertexBuffer,
                 indexBuffer,
                 pipeline,
-                depthFormat);
+                depthFormat,
+                sceneryRenderer);
         }
         catch
         {
             // Buffer creation submits its own upload command buffer, so drain pending
             // work before releasing anything the GPU may still reference.
             SDL.WaitForGPUIdle(device.Handle);
+
+            sceneryRenderer?.Dispose();
 
             if (pipeline != IntPtr.Zero)
             {
@@ -226,7 +254,19 @@ internal sealed class TerrainPresenter : IFramePresenter
     }
 
     /// <summary>
-    /// Applies input, then draws one depth-tested frame of the terrain.
+    /// Gets a one-line description of what the scenery renderer uploaded, or
+    /// <see langword="null"/> in the terrain-only view.
+    /// </summary>
+    internal string? SceneryUploadSummary => _scenery is null
+        ? null
+        : $"scenery upload: {_scenery.DrawnInstances} instance(s), " +
+          $"{_scenery.DrawnSubsets} subset(s), {_scenery.UploadedMeshes} mesh(es), " +
+          $"{_scenery.UploadedTextures} texture(s), " +
+          $"{_scenery.FailedInstances} not drawable";
+
+    /// <summary>
+    /// Applies input, then draws one depth-tested frame of terrain and, when supplied,
+    /// scenery.
     /// </summary>
     /// <returns>
     /// <see langword="true"/> when a frame was submitted, and <see langword="false"/>
@@ -365,6 +405,8 @@ internal sealed class TerrainPresenter : IFramePresenter
             0,
             0);
 
+        _scenery?.Draw(renderPass, commandBuffer, viewProjection);
+
         SDL.EndGPURenderPass(renderPass);
 
         if (!SDL.SubmitGPUCommandBuffer(commandBuffer))
@@ -377,7 +419,8 @@ internal sealed class TerrainPresenter : IFramePresenter
     }
 
     /// <summary>
-    /// Releases the terrain resources. The device and window belong to the host.
+    /// Releases the scenery and terrain resources. The device and window belong to the
+    /// host.
     /// </summary>
     public void Dispose()
     {
@@ -395,6 +438,8 @@ internal sealed class TerrainPresenter : IFramePresenter
         }
 
         SDL.WaitForGPUIdle(_device);
+
+        _scenery?.Dispose();
 
         if (_depthTexture != IntPtr.Zero)
         {

@@ -331,8 +331,73 @@ public sealed class HostOptionsTests
         Assert.Contains("--map", HostOptions.UsageText, StringComparison.Ordinal);
         Assert.Contains("--render", HostOptions.UsageText, StringComparison.Ordinal);
         Assert.Contains("--terrain-3d", HostOptions.UsageText, StringComparison.Ordinal);
+        Assert.Contains("--scene-3d", HostOptions.UsageText, StringComparison.Ordinal);
         Assert.Contains("--world", HostOptions.UsageText, StringComparison.Ordinal);
         Assert.Contains("--help", HostOptions.UsageText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Scene3DRequiresAMap()
+    {
+        Assert.False(HostOptions.TryParse(
+            new[] { "--scene-3d" },
+            out _,
+            out string? error));
+
+        Assert.Contains("requires --map", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Scene3DSelectsTheSceneryView()
+    {
+        bool parsed = HostOptions.TryParse(
+            new[] { "--map", "maps/TestMap", "--scene-3d" },
+            out HostOptions options,
+            out string? error);
+
+        Assert.True(parsed);
+        Assert.Null(error);
+        Assert.True(options.Scene3D);
+        Assert.False(options.Terrain3D);
+        Assert.False(options.RenderMap);
+    }
+
+    [Theory]
+    [InlineData("--terrain-3d")]
+    [InlineData("--render")]
+    public void Scene3DIsExclusiveWithTheOtherViews(string other)
+    {
+        Assert.False(HostOptions.TryParse(
+            new[] { "--map", "maps/TestMap", "--scene-3d", other },
+            out _,
+            out string? error));
+
+        Assert.Contains("cannot be combined", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Scene3DCannotBeCombinedWithWorldInspection()
+    {
+        Assert.False(HostOptions.TryParse(
+            new[] { "--scene-3d", "--world", "maps/TestMap" },
+            out _,
+            out string? error));
+
+        Assert.Contains("cannot be combined", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SmokeCanBudgetSceneryRun()
+    {
+        bool parsed = HostOptions.TryParse(
+            new[] { "--map", "maps/TestMap", "--scene-3d", "--smoke" },
+            out HostOptions options,
+            out string? error);
+
+        Assert.True(parsed);
+        Assert.Null(error);
+        Assert.True(options.Scene3D);
+        Assert.Equal(HostOptions.SmokeFrameCount, options.MaximumFrames);
     }
 
     [Fact]

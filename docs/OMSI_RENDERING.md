@@ -9,6 +9,10 @@ scenery, and how the owner validates it on Windows.
 installation and a real GPU backend on Windows: `NOT RUN (owner validation
 pending)`.
 
+This document covers the 2D plan only. Later tasks add the 3D terrain view
+([OMSI_TERRAIN_3D.md](OMSI_TERRAIN_3D.md)) and the scenery scene view
+([OMSI_SCENERY_3D.md](OMSI_SCENERY_3D.md)); `--render` itself is unchanged.
+
 ## What the window shows
 
 `--map <directory> --render` opens the native Nymeria window and draws a

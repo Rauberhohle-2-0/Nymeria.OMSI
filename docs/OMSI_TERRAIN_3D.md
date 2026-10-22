@@ -144,10 +144,13 @@ Geometry is generated once, before the window opens. Nothing is rebuilt per fram
 
 ## Rendering
 
-[TerrainPresenter](../src/Nymeria.OMSI/Rendering/TerrainPresenter.cs) is host-boundary
+[ScenePresenter](../src/Nymeria.OMSI/Rendering/ScenePresenter.cs) is host-boundary
 code, like the Task 04 presenter: it uses the `SDL_GPUDevice*` the engine exposes for
 exactly this purpose and records its own pass. It creates no renderer abstraction and
-no second graphics framework.
+no second graphics framework. In Task 06 it gained an optional scenery renderer and
+was renamed from `TerrainPresenter`, because it now presents one scene that may or may
+not include objects; `--terrain-3d` still passes no scenery, so its behavior is
+unchanged. See [OMSI_SCENERY_3D.md](OMSI_SCENERY_3D.md) for the scenery path.
 
 - One graphics pipeline: one interleaved vertex buffer (position, normal, colour as
   three `Float3` attributes at offsets 0, 12, and 24), 32-bit indices, triangle list,

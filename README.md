@@ -3,15 +3,17 @@
 An independent, cross-platform OMSI-compatible bus simulation built on the
 [Nymeria](https://github.com/Rauberhohle-2-0/Nymeria) 3D engine.
 
-> **Current state: Task 05 — real 3D terrain from decoded OMSI heights.**
+> **Current state: Task 06 — real OMSI scenery objects over the decoded 3D terrain.**
 > The host runs the Task 01 bootstrap (window, engine GPU device, clear frames, clean
 > shutdown), reads one explicitly named map folder (`--map`, `--world`), shows a
 > **diagnostic plan** of the parsed tiles and placements with
-> `--map <directory> --render`, and with `--map <directory> --terrain-3d` decodes each
-> tile's `.map.terrain` heights and draws the resulting **3D terrain** in a perspective
-> view with a free-fly camera. It renders **no** OMSI scenery, splines, or ground
-> textures, and it loads no OMSI asset. Nothing here claims OMSI compatibility, and
-> the terrain has not yet been compared with a real map on Windows.
+> `--map <directory> --render`, decodes each tile's `.map.terrain` heights and draws the
+> resulting **3D terrain** with `--map <directory> --terrain-3d`, and with
+> `--map <directory> --scene-3d` resolves, decodes, and draws a **bounded subset of the
+> map's real scenery objects** over that terrain. Roads and splines, vehicles, scripts,
+> animation, water, and ground textures are still **not** rendered, and no missing asset
+> is ever replaced by substitute geometry. Nothing here claims OMSI compatibility, and
+> no part of it has been compared with a real map on Windows yet.
 
 ## What exists today
 
@@ -34,13 +36,22 @@ An independent, cross-platform OMSI-compatible bus simulation built on the
   drawn depth-tested through the engine device with this repository's own HLSL and
   Metal shaders, and a free-fly camera. Terrain only: no scenery, splines, or ground
   textures. See [docs/OMSI_TERRAIN_3D.md](docs/OMSI_TERRAIN_3D.md).
+- A scenery scene mode: safe case-insensitive resolution of `.sco` references under
+  the installation root, a documented-subset `.sco`/model-configuration parser, mesh
+  decoding through the engine's own `.o3d` and `.x` parsers, texture decoding through
+  the engine's texture loader, terrain-relative placement heights, and depth-tested
+  drawing of a bounded, cached subset of real objects. Missing and unsupported assets
+  are counted and reported, never substituted. See
+  [docs/OMSI_SCENERY_3D.md](docs/OMSI_SCENERY_3D.md).
 - A clear-only frame path with no shader assets, and a Windows-only DXIL build step
-  for the terrain shaders that provisions and verifies the DirectX Shader Compiler
-  once per machine.
+  for the terrain and scenery shaders that provisions and verifies the DirectX Shader
+  Compiler once per machine.
 - Readable startup diagnostics for missing native SDL3, architecture mismatches,
   missing GPU backends, and initialization failures.
 - Headless unit tests for the host's command-line contract, the map metadata layer,
-  the tile/world parser, terrain decoding, mesh generation, and the terrain camera.
+  the tile/world parser, terrain decoding, mesh generation, the terrain camera,
+  scenery path resolution, the scenery definition parser, placement transforms,
+  terrain height sampling, and scenery loading with synthetic assets only.
 - The engine pinned as a Git submodule at one commit, with no engine source in this
   repository.
 - Enforceable policies: [AGENTS.md](AGENTS.md),
@@ -201,20 +212,49 @@ missing or unreadable one. The format evidence, the documented-versus-assumed ta
 the coordinate mapping, limits, and the Windows checklist are in
 [docs/OMSI_TERRAIN_3D.md](docs/OMSI_TERRAIN_3D.md).
 
+## Show terrain with real scenery objects
+
+`--scene-3d` draws the same terrain plus a bounded, deterministic subset of the map's
+scenery objects, resolved from the OMSI installation the map folder belongs to. It
+requires `--map` and cannot be combined with `--render`, `--terrain-3d`, or `--world`:
+
+```bat
+src\Nymeria.OMSI\bin\Release\net10.0\Nymeria.OMSI.exe --map "<path>\OMSI 2\maps\Grundorf" --scene-3d
+```
+
+Each object's `.sco` definition is resolved under `<installation>\Sceneryobjects`,
+parsed for its model and mesh references, and decoded by the engine's own `.o3d`/`.x`
+and texture decoders. Placement x/y are added to the tile origin, and z is
+terrain-relative unless the object declares `[absheight]`, so objects sit on the
+decoded ground rather than at an invented height. Repeated placements share one decoded
+mesh, texture, and upload. The camera controls are the terrain view's: `W/A/S/D`,
+`Space`/`Ctrl`, `Shift`, right-button look, and `R` to reset.
+
+The console summary counts every placement considered, instanced, and skipped, with
+the reason for each kind of skip, and lists the first asset problems with their tile
+and line. A missing or unsupported asset is reported — there are no substitute boxes.
+Roads and splines, vehicles, scripts, animation, and ground textures are not rendered.
+The supported `.sco` subset, the documented-versus-assumed table, the transform
+conventions, the limits, and the Windows checklist are in
+[docs/OMSI_SCENERY_3D.md](docs/OMSI_SCENERY_3D.md).
+
 ## Platform status
 
 | Platform | Build | Headless tests | Runtime (window, GPU, shutdown) |
 | --- | --- | --- | --- |
-| macOS (development host) | `PASS` — local, macOS 27.0.1 arm64, SDK 10.0.402 | `PASS` — local, 193 tests | `NOT RUN` — intentionally not executed on macOS |
+| macOS (development host) | `PASS` — local, macOS 27.0.1 arm64, SDK 10.0.402 | `PASS` — local, 256 tests | `NOT RUN` — intentionally not executed on macOS |
 | Windows (owner host) | `NOT RUN` — CI job defined, no run recorded yet | `NOT RUN` — CI job defined, no run recorded yet | `NOT RUN (owner validation pending)` |
 | Linux | Not supported | — | Not supported; the engine has no Linux GPU backend |
 
-Map metadata, tile/world parsing, terrain decoding, and terrain mesh generation
-against synthetic fixtures run headlessly in the unit tests. The same code against a
-real Grundorf installation is `NOT RUN (owner validation pending)`: no OMSI files
-exist on the development machine, and no substitute files were created to simulate
-them. The Direct3D 12 pipeline and the DXIL shaders are compiled and drawn only on
-Windows, so their verification is the owner's run.
+Map metadata, tile/world parsing, terrain decoding, terrain mesh generation, scenery
+path resolution, scenery definition parsing, placement transforms, terrain height
+sampling, and scenery loading against synthetic fixtures run headlessly in the unit
+tests. The same code against a real Grundorf installation is
+`NOT RUN (owner validation pending)`: no OMSI files exist on the development machine,
+and no substitute OMSI assets were created to simulate them — the scenery tests use a
+short text `.x` mesh and a generated bitmap written by the test itself. The Direct3D 12
+pipeline and the DXIL shaders are compiled and drawn only on Windows, so their
+verification is the owner's run.
 
 The engine itself documents Metal/MSL as validated on macOS and Direct3D 12/DXIL as
 implemented but unverified on Windows hardware. This repository inherits that gap;
@@ -243,6 +283,10 @@ are recorded in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
   its evidence, documented versus assumed properties, decoding and diagnostics, mesh
   generation and coordinate mapping, the shader and DXIL build step, camera controls,
   limits, Windows validation.
+- [docs/OMSI_SCENERY_3D.md](docs/OMSI_SCENERY_3D.md) — scenery reference resolution and
+  its safety rules, the supported `.sco`/model-configuration subset and its evidence,
+  mesh and texture loading, placement transforms and their assumptions, caching and
+  limits, reported counts, and the Windows validation checklist.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — ownership boundary, integration
   decision, host lifecycle, build graph, platform backends, limitations.
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — SDK setup, submodule commands, macOS
@@ -253,17 +297,18 @@ are recorded in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Next milestone
 
-The immediate next step is the owner's Windows validation of `--map --terrain-3d`
-against a legally installed Grundorf: whether the decoded relief matches the map,
-whether the surface is continuous across tile borders, and whether the ground is
-mirrored along an axis. That run is the only thing that can settle the terrain grid's
-orientation, and it is reported as unverified until then.
+The immediate next step is the owner's Windows validation of `--map --terrain-3d` and
+`--map --scene-3d` against a legally installed Grundorf: whether the decoded relief
+matches the map, whether the surface is continuous across tile borders, and whether a
+known object appears where OMSI puts it, upright and un-mirrored. That run is the only
+thing that can settle the terrain grid's orientation and the placement conventions,
+and both are reported as unverified until then.
 
-The 3D terrain mode already established this repository's own shader build step, so
-scenery becomes possible, but it is not approved. The narrowest useful follow-up is a
-read-only scenery **inventory**: deterministic, unit-tested, and asset-free. Far
-scenery rendering still needs mesh decoding (`.o3d`/`.x`), reference resolution under
-the content root, and materials and textures; spline tessellation, terrain holes,
+Roads and splines are the next rendering task. They need one thing this task did not
+build — sweeping a `.sli` profile along a parsed spline curve — plus multi-material and
+blended drawing. The asset plumbing they need (safe content-root resolution, config
+parsing, engine mesh and texture decoders with caching, terrain-relative height
+sampling, and the depth-tested scene pass) now exists and is reusable. Terrain holes,
 vehicle physics, world streaming, and OMSI scripting remain unapproved.
 
 ## License

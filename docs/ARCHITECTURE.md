@@ -296,9 +296,9 @@ terrain meshes and the shader build step; scenery geometry is still absent.
 ## 3D terrain mode
 
 The terrain mode added by Task 05 lives in `src/Nymeria.OMSI/Terrain/` (decoding and
-geometry, GPU-free) and `src/Nymeria.OMSI/Rendering/TerrainPresenter.cs` (the
-host-boundary draw). Its contract is [docs/OMSI_TERRAIN_3D.md](OMSI_TERRAIN_3D.md);
-this section records only the boundary.
+geometry, GPU-free) and `src/Nymeria.OMSI/Rendering/ScenePresenter.cs` (the
+host-boundary draw, named for the presented scene since Task 06). Its contract is
+[docs/OMSI_TERRAIN_3D.md](OMSI_TERRAIN_3D.md); this section records only the boundary.
 
 ```text
 OmsiWorldTile + <tile>.map.terrain
@@ -313,7 +313,7 @@ TerrainMeshBuilder ──► TerrainMesh (per tile)   positions, normals, CCW in
 OmsiTerrainModel ──► one vertex buffer + one index buffer
         │
         ▼
-TerrainPresenter: GpuDevice.CreateBuffer + CreateShader + one depth-tested draw
+ScenePresenter: GpuDevice.CreateBuffer + CreateShader + one depth-tested draw
 ```
 
 Rules that keep the boundary intact:
@@ -349,6 +349,65 @@ Rules that keep the boundary intact:
 Not in this mode, and not approved: OMSI ground textures, terrain holes, water, light
 maps, scenery or spline geometry, asset loading, advanced lighting, shadows, terrain
 streaming, and LOD.
+
+## Scenery scene mode
+
+The scenery mode added by Task 06 lives in `src/Nymeria.OMSI/Scenery/` (resolution,
+definition parsing, mesh and texture loading, placement math — GPU-free) and
+`src/Nymeria.OMSI/Rendering/SceneryRenderer.cs` (the host-boundary draw). Its contract
+is [docs/OMSI_SCENERY_3D.md](OMSI_SCENERY_3D.md); this section records only the
+boundary.
+
+```text
+OmsiObjectPlacement (Task 03) + derived installation root + TerrainHeightSampler
+        │
+        ▼
+SceneryPath ──► resolved .sco under the content root (case-insensitive, no traversal)
+        │
+        ▼
+SceneryDefinitionParser ──► meshes, [matl] textures, [absheight], unsupported keywords
+        │
+        ▼
+Nymeria.Formats.O3d / .DirectX / .Textures ──► MeshData + Texture, cached by path
+        │
+        ▼
+SceneryTransform ──► one world matrix per placement
+        │
+        ▼
+SceneryRenderer: one buffer set per mesh, one texture per file, one depth-tested draw
+                 per subset, inside the existing ScenePresenter render pass
+```
+
+Rules that keep the boundary intact:
+
+- **Parsing stays separate from the GPU.** `Scenery/` creates no window, device, or GPU
+  resource, so resolution, parsing, decoding, and placement math are all unit-tested
+  headlessly, and a map with broken assets fails with diagnostics instead of a GPU
+  failure.
+- **The engine decodes the formats.** `.o3d`, `.x`, and every texture go through the
+  engine's own parsers and texture loader. This repository adds a resolution policy and
+  a cache, not a decoder, and it changes no engine file.
+- **Untrusted content is bounded.** References are rejected rather than repaired if
+  they are absolute, traversing, drive-qualified, empty-component, or control-character
+  paths; every limit is a constant with a counted consequence (2,000 instances, 256
+  definitions, 512 meshes, 512 textures, 4,000,000 vertices, 64 meshes per definition,
+  40 listed problems).
+- **Placement semantics stay OMSI's.** Tile-local x/y plus the shared tile origin, z
+  terrain-relative unless `[absheight]`, and no snapping to the ground. The one
+  undocumented convention — pitch/bank order — is written down as an assumption in one
+  expression.
+- **One pass, one depth buffer.** `ScenePresenter` opens the pass and draws terrain
+  first, then delegates to `SceneryRenderer` with the same command buffer and
+  view-projection matrix. There is no second renderer, no scene graph, and no new
+  abstraction over passes.
+- **Honest labelling.** The summary counts every placement considered, instanced, and
+  skipped with a reason, lists the first asset problems with tile and line, and states
+  that roads, splines, vehicles, and scripts are not drawn. A missing asset is never
+  replaced by substitute geometry.
+
+Not in this mode, and not approved: roads and spline tessellation, vehicles, scripts,
+animation, interaction, collision, night lighting, dynamic shadows, terrain holes,
+water, ground textures, blended transparency, culling, streaming, and LOD.
 
 ## OMSI tile and world data layer
 
@@ -417,8 +476,12 @@ Nymeria.OMSI.slnx
 ├── src/Nymeria.OMSI/Nymeria.OMSI.csproj        (Exe, net10.0)
 │     ├── external/Nymeria/src/platform/Nymeria.Platform/Nymeria.Platform.csproj
 │     │     └── NuGet: SDL3-CS 3.4.18, SDL3-CS.MacOS 3.4.18, SDL3-CS.Windows 3.4.18
-│     └── external/Nymeria/src/graphics/Nymeria.Graphics/Nymeria.Graphics.csproj
-│           └── NuGet: SDL3-CS 3.4.18
+│     ├── external/Nymeria/src/graphics/Nymeria.Graphics/Nymeria.Graphics.csproj
+│     │     └── NuGet: SDL3-CS 3.4.18
+│     ├── external/Nymeria/src/core/Nymeria.Core/Nymeria.Core.csproj
+│     ├── external/Nymeria/src/formats/Nymeria.Formats.O3d/Nymeria.Formats.O3d.csproj
+│     ├── external/Nymeria/src/formats/Nymeria.Formats.DirectX/Nymeria.Formats.DirectX.csproj
+│     └── external/Nymeria/src/formats/Nymeria.Formats.Textures/Nymeria.Formats.Textures.csproj
 └── tests/Nymeria.OMSI.Tests/Nymeria.OMSI.Tests.csproj   (xUnit, net10.0)
       └── src/Nymeria.OMSI (for HostOptions only; no SDL call is made)
 ```
@@ -437,13 +500,14 @@ Nymeria.OMSI.slnx
   3D terrain view draw respectively a CPU rasterized plan texture and a terrain mesh;
   neither loads an OMSI asset.
 - No audio device is created. `Nymeria.Audio` is not referenced.
-- Map support is read-only parsing plus terrain. Object and spline records are parsed
-  but not turned into geometry, ground textures and light maps are not read, and no
-  asset reference is resolved. Nothing is simulated. Grundorf compatibility is
-  unverified.
-- Terrain is terrain only. Scenery, splines, roads, water, terrain holes, and OMSI's
-  lighting are absent from the 3D view, and the terrain grid's row orientation is an
-  assumption until the owner compares it with the real map.
+- Map support is read-only parsing plus terrain and a bounded scenery scene. Spline
+  records are parsed but not turned into geometry, ground textures and light maps are
+  not read, and nothing is simulated. Grundorf compatibility is unverified.
+- The 3D views omit splines, roads, vehicles, water, terrain holes, ground textures,
+  and OMSI's lighting. The terrain grid's row orientation and the scenery pitch/bank
+  convention are assumptions until the owner compares them with the real map.
+- Scenery is a bounded prefix of placements (2,000) with no frustum or distance
+  culling; alpha-blended materials are drawn with a single 0.5 alpha test.
 - Only `[name]`, `[friendlyname]`, and `[worldcoordinates]` are interpreted from
   `global.cfg`; the tile inventory comes from file names, not from `[map]`.
 - The documented primary encoding is UTF-16LE with a byte-order mark. Files in

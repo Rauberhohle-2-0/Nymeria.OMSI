@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Nymeria.Omsi.Maps;
 using Nymeria.Omsi.Rendering;
+using Nymeria.Omsi.Scenery;
 using Nymeria.Omsi.Terrain;
 using Nymeria.Omsi.World;
 
@@ -22,6 +23,10 @@ namespace Nymeria.Omsi;
 /// <c>--map &lt;directory&gt; --terrain-3d</c> decodes each tile's documented terrain
 /// sidecar and opens a 3D view of the resulting mesh with a free-fly camera. It
 /// renders terrain and nothing else: no scenery, splines, or ground textures.
+/// <c>--map &lt;directory&gt; --scene-3d</c> additionally resolves, parses, and decodes a
+/// bounded, deterministic subset of the map's scenery objects from the OMSI
+/// installation and draws them over the same terrain. Roads and splines, vehicles,
+/// scripts, and animation are still not rendered.
 /// </para>
 /// <para>
 /// It loads no OMSI assets, maps no terrain, and claims no OMSI runtime
@@ -56,6 +61,11 @@ internal static class Program
         {
             if (options.MapDirectory is not null)
             {
+                if (options.Scene3D)
+                {
+                    return RunSceneRender(options.MapDirectory, options.MaximumFrames);
+                }
+
                 if (options.Terrain3D)
                 {
                     return RunTerrainRender(options.MapDirectory, options.MaximumFrames);
@@ -268,7 +278,7 @@ internal static class Program
 
         using (OmsiHost host = OmsiHost.Start(
             title,
-            (window, device) => TerrainPresenter.Create(window, device, model),
+            (window, device) => ScenePresenter.Create(window, device, model),
             interactiveEventWaitMilliseconds: 16))
         {
             host.ReportDiagnostics(Console.Out);
@@ -291,6 +301,114 @@ internal static class Program
                         ? "terrain run ended by a quit request"
                         : "terrain run complete");
             }
+        }
+
+        Console.WriteLine("shutdown: clean");
+
+        return ExitSuccess;
+    }
+
+    private static int RunSceneRender(string mapDirectory, int? maximumFrames)
+    {
+        // Parsing, terrain decoding, and scenery loading all happen before any window
+        // or device exists. A map that cannot be read, has no terrain, or has no
+        // loadable scenery therefore fails with counted diagnostics instead of an
+        // empty window or a GPU failure.
+        OmsiWorldModel world = OmsiWorldLoader.Load(mapDirectory);
+
+        if (world.Status == MapScanStatus.Failed)
+        {
+            WorldSummaryWriter.Write(Console.Out, world);
+            Console.Error.WriteLine(
+                "scene: not started — the map produced no usable world data.");
+            return ExitFailure;
+        }
+
+        OmsiTerrainSet terrain = OmsiTerrainSet.Load(world);
+        OmsiTerrainModel model = OmsiTerrainModel.Create(terrain);
+
+        bool hasContentRoot = OmsiContentRoot.TryDerive(
+            world.MapRoot,
+            out string? contentRoot,
+            out string contentRootReason);
+
+        TerrainHeightSampler? heights = terrain.Heightmaps.Count == 0
+            ? null
+            : TerrainHeightSampler.Create(terrain);
+
+        OmsiSceneryLibrary scene = OmsiSceneryLibrary.Load(
+            world,
+            heights,
+            hasContentRoot ? contentRoot : null);
+
+        ScenerySummaryWriter.Write(
+            Console.Out,
+            world,
+            terrain.Heightmaps.Count == 0 ? null : terrain,
+            scene,
+            hasContentRoot ? contentRoot : null);
+
+        if (!hasContentRoot)
+        {
+            Console.Error.WriteLine(
+                "scene: not started — " + contentRootReason + " Scenery references " +
+                "are resolved against the installation root, so they cannot be loaded.");
+            return ExitFailure;
+        }
+
+        if (model.Bounds is null)
+        {
+            Console.Error.WriteLine(
+                "scene: not started — no tile produced a decoded height grid, so there " +
+                "is no terrain to draw. The terrain diagnostics above say why.");
+            return ExitFailure;
+        }
+
+        if (scene.Instances.Count == 0)
+        {
+            Console.Error.WriteLine(
+                "scene: not started — no scenery placement could be loaded, so the " +
+                "view would be terrain only. The scenery diagnostics above say why. " +
+                "Use --terrain-3d for the terrain-only view.");
+            return ExitFailure;
+        }
+
+        string title =
+            $"Nymeria.OMSI — {world.Name ?? world.MapRoot} — 3D terrain + scenery " +
+            $"({scene.Instances.Count} objects)";
+
+        ScenePresenter? presenter = null;
+
+        using (OmsiHost host = OmsiHost.Start(
+            title,
+            (window, device) => presenter = ScenePresenter.Create(window, device, model, scene),
+            interactiveEventWaitMilliseconds: 16))
+        {
+            host.ReportDiagnostics(Console.Out);
+
+            HostRunResult result = host.Run(maximumFrames);
+
+            Console.WriteLine($"frames presented: {result.PresentedFrames}");
+
+            if (maximumFrames is null)
+            {
+                Console.WriteLine(
+                    result.QuitRequested
+                        ? "window closed by the user"
+                        : "frame loop ended without a quit request");
+            }
+            else
+            {
+                Console.WriteLine(
+                    result.QuitRequested
+                        ? "scene run ended by a quit request"
+                        : "scene run complete");
+            }
+        }
+
+        if (presenter?.SceneryUploadSummary is string upload)
+        {
+            Console.WriteLine(upload);
         }
 
         Console.WriteLine("shutdown: clean");

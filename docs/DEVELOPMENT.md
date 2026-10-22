@@ -114,7 +114,7 @@ Notes:
 - Builds are warning-free by policy: `TreatWarningsAsErrors` is enabled in
   [Directory.Build.props](../Directory.Build.props) for this repository's
   projects, and the engine keeps its own settings.
-- The test project runs 193 headless tests. They cover command-line parsing, the
+- The test project runs 256 headless tests. They cover command-line parsing, the
   GPU-free map metadata layer (text encoding selection and fallbacks, keyword-block
   tokenizing, tile file-name parsing, discovery ordering, duplicates, unsupported
   directives, summary output), the GPU-free tile/world layer (record layouts by
@@ -128,14 +128,22 @@ Notes:
   truncated, non-finite, and implausible data, per-tile vertex and triangle counts,
   counter-clockwise winding, 5 m spacing, elevation transfer, normals, tile-edge
   continuity, merged index offsets, the vertex layout, the colour ramp, camera
-  framing and frame-rate independence, and the embedded Metal shader resource). They
-  create no window, no GPU device, and no audio device, and they use only synthetic
-  strings and byte arrays written by the tests.
-- The host itself, including `--map`, `--world`, `--render`, and `--terrain-3d`, is
-  **not** executed on macOS in any task. `dotnet build` and the tests prove
-  compilation, parser, decoder, and geometry behavior, nothing more. A passing tile,
-  plan, or terrain test is not evidence of OMSI/Grundorf compatibility, and it does
-  not exercise the GPU blit or draw path, the DXIL shaders, or the pipeline.
+  framing and frame-rate independence, and the embedded Metal shader resource), and
+  the GPU-free scenery layer (path normalization and traversal rejection,
+  case-insensitive resolution, the `[model]`/`[mesh]`/`[matl]`/`[absheight]` subset,
+  switch-off markers and comment lines, unsupported-keyword counting, placement
+  transforms and their sign conventions, bilinear terrain height sampling, and
+  loading with caching, counted skips, and a synthetic `.x` mesh and bitmap fixture).
+  They create no window, no GPU device, and no audio device, and they use only
+  synthetic strings and byte arrays written by the tests.
+- The host itself, including `--map`, `--world`, `--render`, `--terrain-3d`, and
+  `--scene-3d`, is **not** executed on macOS in any task. `dotnet build` and the tests
+  prove compilation, parser, decoder, and geometry behavior, nothing more. A passing
+  tile, plan, terrain, or scenery test is not evidence of OMSI/Grundorf compatibility,
+  and it does not exercise the GPU blit or draw path, the DXIL shaders, the uploaded
+  scenery textures, or the pipeline. No OMSI asset exists on the development machine;
+  the scenery tests decode a short text `.x` mesh and a generated bitmap that the test
+  writes itself.
 
 Optional formatting check, if `dotnet format` is available in the pinned SDK:
 
@@ -190,6 +198,10 @@ dotnet format Nymeria.OMSI.slnx --verify-no-changes --no-restore
 | `--terrain-3d` reports `status: failed` before a window opens | Not one discovered tile could be interpreted, so there is no terrain to place. Run `--world` on the same folder for the per-tile diagnostics. |
 | `--terrain-3d` reports `terrain: not started — no tile produced a decoded height grid` | Every sidecar was missing or rejected. The terrain diagnostics name each file and the reason; a file of another size or header is a finding to report, not something to work around. |
 | `--terrain-3d` reports rejected sidecars | The decoder only accepts the documented `u32 (=60)` + 61 x 61 `f32` layout. Report the file size, the header value, and the diagnostic rather than editing the map. |
+| `--scene-3d` reports `content root: (not derived)` | The map folder is not inside a folder named `maps`, so nothing can be resolved. Point `--map` at the map folder inside the installation, not at a copy elsewhere. |
+| `--scene-3d` reports many unresolved references | The derived root is wrong or the map was copied without its `Sceneryobjects` folder. The diagnostics name the reference and the folder that was searched. |
+| `--scene-3d` reports `scene: not started — no scenery placement could be loaded` | Every placement failed to resolve, parse, decode, or place. The counted summary separates unresolved references, definitions without drawable geometry, missing terrain, and invalid transforms; `--terrain-3d` still works. |
+| Objects float, sink, or are rotated oddly | Height semantics, the axis change, and the pitch/bank convention are three separate, documented expressions. Record which object, the tile, and how it is wrong before changing anything. |
 | The terrain window is black or empty | Check the console's `engine:` line and any error. A black frame with `geometry:` reporting triangles is a GPU-side finding: report the driver line, depth format availability, window size, and whether the window was resized. |
 
 ## Continuous integration
@@ -362,6 +374,7 @@ its configuration metadata.
    Repeat without a human at the keyboard:
    ```bat
    src\Nymeria.OMSI\bin\Release\net10.0\Nymeria.OMSI.exe --map "C:\Program Files (x86)\Steam\steamapps\common\OMSI 2\maps\Grundorf" --terrain-3d --smoke
+   src\Nymeria.OMSI\bin\Release\net10.0\Nymeria.OMSI.exe --map "C:\Program Files (x86)\Steam\steamapps\common\OMSI 2\maps\Grundorf" --scene-3d --smoke
    ```
    Expected: 120 frames, `terrain run complete`, `shutdown: clean`, exit code `0`.
 
@@ -372,6 +385,22 @@ its configuration metadata.
 
    The full checklist is in
    [OMSI_TERRAIN_3D.md](OMSI_TERRAIN_3D.md#on-windows-owner).
+
+   Then exercise the scene view:
+   ```bat
+   src\Nymeria.OMSI\bin\Release\net10.0\Nymeria.OMSI.exe --map "C:\Program Files (x86)\Steam\steamapps\common\OMSI 2\maps\Grundorf" --scene-3d
+   ```
+   Expected: the same terrain plus identifiable real objects, a summary whose
+   placement, asset, and skip counts add up, and, after closing the window, a
+   `scenery upload:` line with a non-zero instance count.
+
+   Check at least one object you can name: is it in the right place, upright, the
+   expected size, and textured with the real texture? Report the object, its tile, and
+   what was wrong if not. Also confirm that resizing, camera movement, and closing
+   behave as in the terrain view, and that `--terrain-3d` and `--render` are unchanged.
+
+   The full checklist is in
+   [OMSI_SCENERY_3D.md](OMSI_SCENERY_3D.md#windows-validation-checklist).
 
    The host's other five steps need no OMSI assets; these four need only the owner's
    legally installed map folder.
@@ -392,6 +421,9 @@ Report, in the task report or issue:
 - For `--render`: the full console summary, the window title, the `engine:` line,
   what the plan looked like (tiles and markers visible or not), whether panning and
   zooming stayed responsive, and how the window closed.
+- For `--scene-3d`: the placement, asset, and skip counts, the listed asset
+  diagnostics, and the `scenery upload:` line printed after the window closes. Whether
+  a real object is visible, upright, and textured is the owner's visual check.
 - For `--terrain-3d`: the full console summary, the window title, the `engine:` line,
   the decoded/rejected sidecar counts and every terrain diagnostic, what the surface
   looked like (continuous, gaps, mirrored, flat), whether the camera controls stayed

@@ -1,0 +1,344 @@
+using System.Numerics;
+using Nymeria.Omsi.Maps;
+using Nymeria.Omsi.Scenery;
+using Nymeria.Omsi.Terrain;
+using Nymeria.Omsi.World;
+
+namespace Nymeria.OMSI.Tests;
+
+/// <summary>
+/// Headless tests for scenery loading, caching, and counted skips.
+/// </summary>
+/// <remarks>
+/// The whole installation layout here is synthetic: a map folder, a Sceneryobjects
+/// folder, a tiny text <c>.x</c> mesh, and a generated bitmap. It proves the loader's
+/// resolution, caching, and counting rules. It is not OMSI content and says nothing
+/// about whether a real Grundorf object renders.
+/// </remarks>
+public sealed class OmsiSceneryLibraryTests
+{
+    private const string Mesh = """
+        xof 0303txt 0032
+
+        Frame Root {
+          FrameTransformMatrix {
+            1.000000,0.000000,0.000000,0.000000,
+            0.000000,1.000000,0.000000,0.000000,
+            0.000000,0.000000,1.000000,0.000000,
+            0.000000,0.000000,0.000000,1.000000;;
+          }
+
+          Mesh Box {
+            3;
+            -1.000000;0.000000;-1.000000;,
+            1.000000;0.000000;-1.000000;,
+            0.000000;2.000000;0.000000;;
+            1;
+            3;0,1,2;;
+
+            MeshNormals {
+              3;
+              0.000000;1.000000;0.000000;,
+              0.000000;1.000000;0.000000;,
+              0.000000;1.000000;0.000000;;
+              1;
+              3;0,1,2;;
+            }
+
+            MeshTextureCoords {
+              3;
+              0.000000;0.000000;,
+              1.000000;0.000000;,
+              1.000000;1.000000;;
+            }
+
+            MeshMaterialList {
+              1;
+              1;
+              0;;
+              Material wall.bmp {
+                1.000000;1.000000;1.000000;1.000000;;
+                1.000000;
+                0.000000;0.000000;0.000000;;
+                0.000000;0.000000;0.000000;;
+                TextureFilename {
+                  "wall.bmp";
+                }
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void LoadsOneModelAndTwoInstancesFromOneDefinition()
+    {
+        using Installation installation = Installation.Create(objectPlacements: 2);
+
+        OmsiWorldModel world = OmsiWorldLoader.Load(installation.MapDirectory);
+        OmsiTerrainSet terrain = OmsiTerrainSet.Load(world);
+        OmsiSceneryLibrary scene = OmsiSceneryLibrary.Load(
+            world,
+            TerrainHeightSampler.Create(terrain),
+            installation.RootPath);
+
+        Assert.Equal(2, scene.Counts.PlacementsConsidered);
+        Assert.Equal(2, scene.Counts.InstancesCreated);
+        Assert.Equal(1, scene.Counts.ModelsLoaded);
+        Assert.Equal(2, scene.Instances.Count);
+        Assert.Same(scene.Instances[0].Model, scene.Instances[1].Model);
+        Assert.Equal(1, scene.Counts.MeshesDecoded);
+        Assert.Equal(0, scene.Counts.UnresolvedReferences);
+    }
+
+    [Fact]
+    public void PlacesTerrainRelativeObjectsOnTheDecodedGround()
+    {
+        using Installation installation = Installation.Create(objectPlacements: 1);
+
+        OmsiWorldModel world = OmsiWorldLoader.Load(installation.MapDirectory);
+        OmsiTerrainSet terrain = OmsiTerrainSet.Load(world);
+        OmsiSceneryLibrary scene = OmsiSceneryLibrary.Load(
+            world,
+            TerrainHeightSampler.Create(terrain),
+            installation.RootPath);
+
+        SceneryInstance instance = Assert.Single(scene.Instances);
+
+        // The tile is flat at 3 m and the placement z is 1 m: the object's origin is
+        // at 4 m, not at 1 m and not snapped to the ground.
+        Assert.Equal(4.0f, instance.Transform.Translation.Y, precision: 3);
+        Assert.Equal(0, scene.Counts.SkippedWithoutTerrain);
+    }
+
+    [Fact]
+    public void SkipsTerrainRelativeObjectsWhenNoTerrainCoversThem()
+    {
+        using Installation installation = Installation.Create(objectPlacements: 1);
+
+        OmsiWorldModel world = OmsiWorldLoader.Load(installation.MapDirectory);
+        OmsiSceneryLibrary scene = OmsiSceneryLibrary.Load(
+            world,
+            terrain: null,
+            installation.RootPath);
+
+        Assert.Empty(scene.Instances);
+        Assert.Equal(1, scene.Counts.SkippedWithoutTerrain);
+        Assert.Contains(
+            scene.Diagnostics,
+            diagnostic => diagnostic.Message.Contains(
+                "terrain-relative",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void CountsUnresolvedReferencesWithTheirTileAndLine()
+    {
+        using Installation installation = Installation.Create(
+            objectPlacements: 1,
+            objectReference: @"Sceneryobjects\Absent\missing.sco");
+
+        OmsiWorldModel world = OmsiWorldLoader.Load(installation.MapDirectory);
+        OmsiTerrainSet terrain = OmsiTerrainSet.Load(world);
+        OmsiSceneryLibrary scene = OmsiSceneryLibrary.Load(
+            world,
+            TerrainHeightSampler.Create(terrain),
+            installation.RootPath);
+
+        Assert.Empty(scene.Instances);
+        Assert.Equal(1, scene.Counts.UnresolvedReferences);
+        Assert.Contains(
+            scene.Diagnostics,
+            diagnostic => diagnostic.Message.Contains(
+                "could not be resolved",
+                StringComparison.Ordinal) &&
+                diagnostic.LineNumber is not null);
+    }
+
+    [Fact]
+    public void RefusesToResolveAnythingWithoutAContentRoot()
+    {
+        using Installation installation = Installation.Create(objectPlacements: 1);
+
+        OmsiWorldModel world = OmsiWorldLoader.Load(installation.MapDirectory);
+
+        OmsiSceneryLibrary scene = OmsiSceneryLibrary.Load(
+            world,
+            terrain: null,
+            contentRoot: null);
+
+        Assert.Empty(scene.Instances);
+        Assert.Equal(0, scene.Counts.PlacementsConsidered);
+        Assert.Contains(
+            scene.Diagnostics,
+            diagnostic => diagnostic.Message.Contains(
+                "installation root",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void LoadedModelsUseTheEngineTextureForTheSubset()
+    {
+        using Installation installation = Installation.Create(objectPlacements: 1);
+
+        OmsiWorldModel world = OmsiWorldLoader.Load(installation.MapDirectory);
+        OmsiTerrainSet terrain = OmsiTerrainSet.Load(world);
+        OmsiSceneryLibrary scene = OmsiSceneryLibrary.Load(
+            world,
+            TerrainHeightSampler.Create(terrain),
+            installation.RootPath);
+
+        SceneryModel model = Assert.Single(scene.Models);
+
+        Assert.NotEmpty(model.Subsets);
+        Assert.All(model.Subsets, subset => Assert.True(subset.IndexCount > 0));
+        Assert.Contains(
+            model.Subsets,
+            subset => subset.Material.BaseColorTexture is not null);
+
+        Assert.True(scene.Counts.TexturesDecoded > 0);
+    }
+
+    [Fact]
+    public void InstanceTransformsUseTheTileOrigin()
+    {
+        using Installation installation = Installation.Create(objectPlacements: 1);
+
+        OmsiWorldModel world = OmsiWorldLoader.Load(installation.MapDirectory);
+        OmsiTerrainSet terrain = OmsiTerrainSet.Load(world);
+        OmsiSceneryLibrary scene = OmsiSceneryLibrary.Load(
+            world,
+            TerrainHeightSampler.Create(terrain),
+            installation.RootPath);
+
+        SceneryInstance instance = Assert.Single(scene.Instances);
+        Vector3 origin = instance.Transform.Translation;
+
+        // Tile (0, 0), placement x = 12.5, y = 3.25, z = 1 above 3 m of ground.
+        // OMSI +y is world -z.
+        Assert.Equal(12.5f, origin.X, precision: 3);
+        Assert.Equal(4.0f, origin.Y, precision: 3);
+        Assert.Equal(-3.25f, origin.Z, precision: 3);
+    }
+
+    /// <summary>
+    /// A synthetic installation: a map inside <c>maps</c> and one scenery object beside
+    /// it, which is the layout the host's content-root derivation expects.
+    /// </summary>
+    private sealed class Installation : IDisposable
+    {
+        private Installation(
+            TemporaryDirectory root,
+            string mapDirectory,
+            string scoPath)
+        {
+            Root = root;
+            MapDirectory = mapDirectory;
+            ScoPath = scoPath;
+        }
+
+        internal TemporaryDirectory Root { get; }
+
+        internal string RootPath => Root.Path;
+
+        internal string MapDirectory { get; }
+
+        internal string ScoPath { get; }
+
+        internal static Installation Create(
+            int objectPlacements,
+            string objectReference = @"Sceneryobjects\Test\object.sco")
+        {
+            var root = new TemporaryDirectory();
+
+            string mapDirectory = Path.Combine(root.Path, "maps", "TestMap");
+            Directory.CreateDirectory(mapDirectory);
+
+            File.WriteAllText(
+                Path.Combine(mapDirectory, "global.cfg"),
+                "[name]\r\nTest Map\r\n",
+                System.Text.Encoding.Unicode);
+
+            var tile = new System.Text.StringBuilder("[version]\r\n12\r\n");
+
+            for (int index = 0; index < objectPlacements; index++)
+            {
+                tile.Append("[object]\r\n");
+                tile.Append("0\r\n");
+                tile.Append(objectReference).Append("\r\n");
+                tile.Append("42\r\n");
+                tile.Append("12.5\r\n");
+                tile.Append("3.25\r\n");
+                tile.Append("1\r\n");
+                tile.Append("0\r\n");
+                tile.Append("-1\r\n");
+                tile.Append("-1\r\n");
+                tile.Append("0\r\n");
+            }
+
+            File.WriteAllText(
+                Path.Combine(mapDirectory, "tile_0_0.map"),
+                tile.ToString(),
+                System.Text.Encoding.Unicode);
+
+            File.WriteAllBytes(
+                Path.Combine(mapDirectory, "tile_0_0.map.terrain"),
+                TerrainDecoderTests.Payload(height: 3.0f));
+
+            string objectDirectory = Path.Combine(
+                root.Path,
+                "Sceneryobjects",
+                "Test");
+
+            Directory.CreateDirectory(objectDirectory);
+
+            string scoPath = Path.Combine(objectDirectory, "object.sco");
+            File.WriteAllText(scoPath, "[model]\r\nmodel.cfg\r\n");
+            File.WriteAllText(
+                Path.Combine(objectDirectory, "model.cfg"),
+                "[mesh]\r\nbox.x\r\n[matl]\r\nwall.bmp\r\n");
+            File.WriteAllText(Path.Combine(objectDirectory, "box.x"), Mesh);
+            File.WriteAllBytes(
+                Path.Combine(objectDirectory, "wall.bmp"),
+                Bitmap());
+
+            return new Installation(root, mapDirectory, scoPath);
+        }
+
+        /// <summary>
+        /// Builds a 2 x 2, 24-bit uncompressed bitmap so the engine's own decoder has a
+        /// real file to read.
+        /// </summary>
+        private static byte[] Bitmap()
+        {
+            const int width = 2;
+            const int height = 2;
+            int rowBytes = ((width * 3) + 3) / 4 * 4;
+            int pixelBytes = rowBytes * height;
+            var bytes = new byte[54 + pixelBytes];
+
+            bytes[0] = (byte)'B';
+            bytes[1] = (byte)'M';
+            BitConverter.GetBytes(bytes.Length).CopyTo(bytes, 2);
+            BitConverter.GetBytes(54).CopyTo(bytes, 10);
+            BitConverter.GetBytes(40).CopyTo(bytes, 14);
+            BitConverter.GetBytes(width).CopyTo(bytes, 18);
+            BitConverter.GetBytes(height).CopyTo(bytes, 22);
+            BitConverter.GetBytes((short)1).CopyTo(bytes, 26);
+            BitConverter.GetBytes((short)24).CopyTo(bytes, 28);
+            BitConverter.GetBytes(pixelBytes).CopyTo(bytes, 34);
+
+            for (int index = 54; index < bytes.Length; index++)
+            {
+                bytes[index] = 0xC0;
+            }
+
+            return bytes;
+        }
+
+        public void Dispose()
+        {
+            Root.Dispose();
+        }
+    }
+}

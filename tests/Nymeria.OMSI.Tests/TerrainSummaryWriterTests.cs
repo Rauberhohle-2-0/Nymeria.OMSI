@@ -56,8 +56,8 @@ public sealed class TerrainSummaryWriterTests
     [Fact]
     public void TerrainShaderFamilyIsEmbeddedUnderTheNameTheEngineResolves()
     {
-        Assembly assembly = typeof(TerrainPresenter).Assembly;
-        string expected = TerrainPresenter.ShaderResourcePrefix + ".metal";
+        Assembly assembly = typeof(ScenePresenter).Assembly;
+        string expected = ScenePresenter.ShaderResourcePrefix + ".metal";
 
         Assert.Equal("Nymeria.OMSI.Shaders.Terrain.metal", expected);
         Assert.Contains(expected, assembly.GetManifestResourceNames());

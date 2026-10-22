@@ -185,8 +185,9 @@ when the underlying check was not performed.
 | `src/Nymeria.OMSI/Maps/` | Read-only OMSI map metadata discovery and configuration parsing; no engine or SDL types. |
 | `src/Nymeria.OMSI/World/` | Read-only OMSI tile-record parsing and the typed world model; no engine, SDL, or GPU types, and no resolved asset paths. |
 | `src/Nymeria.OMSI/Terrain/` | Read-only terrain decoding and geometry: the documented `u32 (=60)` + 61 x 61 `f32` grid, per-tile meshes, and camera framing; no engine, SDL, or GPU types. |
-| `src/Nymeria.OMSI/Rendering/` | Diagnostic plan view and 3D terrain view: pure plan geometry, view math, CPU rasterizer, and the host-boundary presenters that blit the plan or draw the decoded terrain. No OMSI scenery rendering. |
-| `tests/Nymeria.OMSI.Tests/` | Headless tests for GPU-free host code, the map metadata layer, the tile/world layer, and the terrain layer (synthetic fixtures only). |
+| `src/Nymeria.OMSI/Scenery/` | Read-only scenery object loading: traversal-safe reference resolution under the installation root, the documented `.sco`/model-configuration subset, mesh and texture decoding through the engine's own parsers with caching, and placement transforms; no window, SDL, or GPU types. |
+| `src/Nymeria.OMSI/Rendering/` | Diagnostic plan view and 3D scene view: pure plan geometry, view math, CPU rasterizer, and the host-boundary presenters that blit the plan, draw the decoded terrain, and draw a bounded subset of loaded scenery. Roads and splines are not rendered. |
+| `tests/Nymeria.OMSI.Tests/` | Headless tests for GPU-free host code, the map metadata layer, the tile/world layer, the terrain layer, and the scenery layer (synthetic fixtures only; no OMSI assets). |
 | `external/Nymeria/` | Pinned engine submodule (read-only). |
 | `docs/` | Architecture, development, and map/world format documentation. |
 | `scripts/` | Repository checks usable locally and in CI. |

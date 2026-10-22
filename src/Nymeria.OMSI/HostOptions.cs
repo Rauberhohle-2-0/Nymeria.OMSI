@@ -26,7 +26,7 @@ internal sealed class HostOptions
     /// </summary>
     public const string UsageText =
         "Usage: Nymeria.OMSI [-h|--help] [--smoke] [--map <directory>] " +
-        "[--render | --terrain-3d] [--world <directory>]\n" +
+        "[--render | --terrain-3d | --scene-3d] [--world <directory>]\n" +
         "  Opens a native window, initializes the Nymeria GPU device, presents\n" +
         "  cleared frames, and shuts down cleanly. It loads no OMSI content.\n" +
         "  --smoke            Present a fixed number of frames, then exit without input.\n" +
@@ -41,6 +41,12 @@ internal sealed class HostOptions
         "                     and ground textures are not rendered. Controls: W/A/S/D\n" +
         "                     move, Space/Ctrl up/down, Shift faster, right mouse button\n" +
         "                     and mouse look, R resets the view.\n" +
+        "  --scene-3d         With --map: draw the decoded terrain and the scenery\n" +
+        "                     objects of a bounded, deterministic subset of placements,\n" +
+        "                     resolved from the OMSI installation's Sceneryobjects\n" +
+        "                     folder. Missing and unsupported assets are reported, not\n" +
+        "                     replaced. Roads, splines, vehicles, and scripts are not\n" +
+        "                     rendered. Same controls as --terrain-3d.\n" +
         "  --world <directory>  Parse the same map folder's tile files and print a\n" +
         "                     bounded summary of object and spline placements. It\n" +
         "                     renders nothing and creates no window or GPU device.\n" +
@@ -52,7 +58,8 @@ internal sealed class HostOptions
         string? mapDirectory,
         string? worldDirectory,
         bool renderMap,
-        bool terrain3D)
+        bool terrain3D,
+        bool scene3D)
     {
         ShowHelp = showHelp;
         MaximumFrames = maximumFrames;
@@ -60,6 +67,7 @@ internal sealed class HostOptions
         WorldDirectory = worldDirectory;
         RenderMap = renderMap;
         Terrain3D = terrain3D;
+        Scene3D = scene3D;
     }
 
     /// <summary>
@@ -98,6 +106,12 @@ internal sealed class HostOptions
     public bool Terrain3D { get; }
 
     /// <summary>
+    /// Gets a value indicating whether the map's decoded terrain and loaded scenery
+    /// should be shown in a 3D window.
+    /// </summary>
+    public bool Scene3D { get; }
+
+    /// <summary>
     /// Parses command-line arguments.
     /// </summary>
     /// <param name="arguments">The arguments passed to the process.</param>
@@ -117,6 +131,7 @@ internal sealed class HostOptions
         string? worldDirectory = null;
         bool renderMap = false;
         bool terrain3D = false;
+        bool scene3D = false;
 
         for (int index = 0; index < arguments.Count; index++)
         {
@@ -139,6 +154,10 @@ internal sealed class HostOptions
 
                 case "--terrain-3d":
                     terrain3D = true;
+                    break;
+
+                case "--scene-3d":
+                    scene3D = true;
                     break;
 
                 case "--map":
@@ -212,12 +231,12 @@ internal sealed class HostOptions
             }
         }
 
-        if (isSmokeRun && mapDirectory is not null && !renderMap && !terrain3D)
+        if (isSmokeRun && mapDirectory is not null && !renderMap && !terrain3D && !scene3D)
         {
             return Fail(
-                "--smoke and --map cannot be combined without --render or " +
-                "--terrain-3d: --map on its own inspects configuration and " +
-                "diagnostics only, without presenting frames.",
+                "--smoke and --map cannot be combined without --render, " +
+                "--terrain-3d, or --scene-3d: --map on its own inspects configuration " +
+                "and diagnostics only, without presenting frames.",
                 out options,
                 out error);
         }
@@ -270,6 +289,34 @@ internal sealed class HostOptions
                 out error);
         }
 
+        if (scene3D && (renderMap || terrain3D))
+        {
+            return Fail(
+                "--scene-3d cannot be combined with --render or --terrain-3d: it " +
+                "already draws the decoded terrain, with scenery, in one 3D view. " +
+                "Pick one view.",
+                out options,
+                out error);
+        }
+
+        if (scene3D && worldDirectory is not null)
+        {
+            return Fail(
+                "--scene-3d and --world cannot be combined: --world parses tile " +
+                "placements only, without loading assets or presenting frames.",
+                out options,
+                out error);
+        }
+
+        if (scene3D && mapDirectory is null)
+        {
+            return Fail(
+                "--scene-3d requires --map <directory>: there is no map to draw " +
+                "otherwise.",
+                out options,
+                out error);
+        }
+
         if (terrain3D && worldDirectory is not null)
         {
             return Fail(
@@ -294,7 +341,8 @@ internal sealed class HostOptions
             mapDirectory,
             worldDirectory,
             renderMap,
-            terrain3D);
+            terrain3D,
+            scene3D);
         error = null;
         return true;
     }
@@ -304,7 +352,7 @@ internal sealed class HostOptions
         out HostOptions options,
         out string? error)
     {
-        options = new HostOptions(false, null, null, null, false, false);
+        options = new HostOptions(false, null, null, null, false, false, false);
         error = message;
         return false;
     }
