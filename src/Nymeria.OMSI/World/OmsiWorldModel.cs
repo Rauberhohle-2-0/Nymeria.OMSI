@@ -197,6 +197,7 @@ public sealed class OmsiWorldModel
         string? globalConfigPath,
         string? name,
         string? friendlyName,
+        bool usesWorldCoordinates,
         IReadOnlyList<OmsiWorldTile> tiles,
         IReadOnlyList<MapDiagnostic> diagnostics,
         MapScanStatus status)
@@ -205,6 +206,7 @@ public sealed class OmsiWorldModel
         GlobalConfigPath = globalConfigPath;
         Name = name;
         FriendlyName = friendlyName;
+        UsesWorldCoordinates = usesWorldCoordinates;
         Tiles = [.. tiles];
         Diagnostics = [.. diagnostics];
         Status = status;
@@ -221,6 +223,18 @@ public sealed class OmsiWorldModel
 
     /// <summary>Gets the map's <c>[friendlyname]</c> value, or null when unavailable.</summary>
     public string? FriendlyName { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether <c>global.cfg</c> declared
+    /// <c>[worldcoordinates]</c>, which the reference documents as switching the tile
+    /// grid from 300 m tiles to a 1/300-degree grid.
+    /// </summary>
+    /// <remarks>
+    /// This is carried through from the manifest because the grid decides how tile
+    /// coordinates map to world distances. It does not mean the conversion is
+    /// verified; see docs/OMSI_RENDERING.md.
+    /// </remarks>
+    public bool UsesWorldCoordinates { get; }
 
     /// <summary>Gets the discovered tiles in manifest order.</summary>
     public IReadOnlyList<OmsiWorldTile> Tiles { get; }

@@ -24,7 +24,7 @@ namespace Nymeria.Omsi;
 /// window and device must outlive this object.
 /// </para>
 /// </remarks>
-internal sealed class ClearFramePresenter
+internal sealed class ClearFramePresenter : IFramePresenter
 {
     private static readonly SDL.FColor ClearColor = new()
     {
@@ -145,5 +145,12 @@ internal sealed class ClearFramePresenter
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Releases nothing: the device and the window belong to the host.
+    /// </summary>
+    public void Dispose()
+    {
     }
 }

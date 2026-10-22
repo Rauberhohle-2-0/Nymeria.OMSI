@@ -3,15 +3,15 @@
 An independent, cross-platform OMSI-compatible bus simulation built on the
 [Nymeria](https://github.com/Rauberhohle-2-0/Nymeria) 3D engine.
 
-> **Current state: Task 03 — read-only tile and world data parsing.** The host still
-> runs the Task 01 bootstrap (window, engine GPU device, clear frames, clean
-> shutdown). It can also read one explicitly named map folder: `--map` prints
-> `global.cfg` metadata plus the `tile_x_y.map` inventory, and `--world` additionally
-> parses each tile's object and spline placements into a read-only world model with
-> counts, source-located diagnostics, and an explicit status. It does not render a
-> map, build a scene, load terrain heights, meshes, textures, or vehicles, and it
-> reads no OMSI asset. Nothing here claims OMSI compatibility, and real Grundorf
-> compatibility is pending owner validation on Windows.
+> **Current state: Task 04 — map loading and a first, diagnostic visualization.**
+> The host runs the Task 01 bootstrap (window, engine GPU device, clear frames, clean
+> shutdown), reads one explicitly named map folder (`--map`, `--world`), and with
+> `--map <directory> --render` shows a clearly labelled **diagnostic plan** of the
+> parsed tiles and placements in the native Nymeria window: tile squares, object
+> markers, and spline markers, with keyboard pan and zoom. It renders **no** OMSI
+> scenery, terrain, meshes, or textures, and it loads no OMSI asset. Nothing here
+> claims OMSI compatibility, and real Grundorf rendering is pending owner validation
+> on Windows.
 
 ## What exists today
 
@@ -25,6 +25,10 @@ An independent, cross-platform OMSI-compatible bus simulation built on the
   `[spline]`, and `[spline_h]` records into a typed world model, terrain sidecar
   size checks, and a deterministic bounded summary. See
   [docs/OMSI_WORLD_PARSING.md](docs/OMSI_WORLD_PARSING.md).
+- A diagnostic render mode: pure plan geometry, view math, and a CPU rasterizer,
+  presented through the engine device as an uploaded texture blitted to the
+  swapchain with SDL's own blit command. No shader, pipeline, or asset loader. See
+  [docs/OMSI_RENDERING.md](docs/OMSI_RENDERING.md).
 - A clear-only frame path with no shader assets and no shader compiler step.
 - Readable startup diagnostics for missing native SDL3, architecture mismatches,
   missing GPU backends, and initialization failures.
@@ -135,11 +139,36 @@ discovery metadata) or with `--smoke`. Supported records, version thresholds, kn
 limitations, and the Windows validation procedure are in
 [docs/OMSI_WORLD_PARSING.md](docs/OMSI_WORLD_PARSING.md).
 
+## Show the diagnostic map plan
+
+`--render` turns the same parse into a window. It requires `--map`:
+
+```bat
+src\Nymeria.OMSI\bin\Release\net10.0\Nymeria.OMSI.exe --map "<path>\OMSI 2\maps\Grundorf" --render
+```
+
+The window shows one square per discovered tile, one marker per parsed object, and
+one marker per parsed spline, on OMSI's own x/y plane with the documented 300 m tile
+grid (the reference-measured 371.9 m grid for `[worldcoordinates]` maps). Pan with
+`W/A/S/D` or the arrow keys, zoom with `+` and `-`, reset with `R`, and close the
+window to exit. `--smoke` budgets the run, so
+`--map <directory> --render --smoke` presents 120 frames and exits — useful without a
+human at the keyboard:
+
+```bat
+src\Nymeria.OMSI\bin\Release\net10.0\Nymeria.OMSI.exe --map "<path>\OMSI 2\maps\Grundorf" --render --smoke
+```
+
+The console summary states what the window is: a diagnostic tile plan, not OMSI
+scenery. Terrain, meshes, textures, and spline curves are not rendered; asset
+references are listed as unresolved. The coordinate mapping, controls, limits, and
+the Windows checklist are in [docs/OMSI_RENDERING.md](docs/OMSI_RENDERING.md).
+
 ## Platform status
 
 | Platform | Build | Headless tests | Runtime (window, GPU, shutdown) |
 | --- | --- | --- | --- |
-| macOS (development host) | `PASS` — local, macOS 27.0.1 arm64, SDK 10.0.402 | `PASS` — local, 102 tests | `NOT RUN` — intentionally not executed on macOS |
+| macOS (development host) | `PASS` — local, macOS 27.0.1 arm64, SDK 10.0.402 | `PASS` — local, 154 tests | `NOT RUN` — intentionally not executed on macOS |
 | Windows (owner host) | `NOT RUN` — CI job defined, no run recorded yet | `NOT RUN` — CI job defined, no run recorded yet | `NOT RUN (owner validation pending)` |
 | Linux | Not supported | — | Not supported; the engine has no Linux GPU backend |
 
@@ -168,6 +197,9 @@ are recorded in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - [docs/OMSI_WORLD_PARSING.md](docs/OMSI_WORLD_PARSING.md) — interpreted tile
   records and version thresholds, world model and status semantics, terrain sidecar
   checks, limits, Windows validation.
+- [docs/OMSI_RENDERING.md](docs/OMSI_RENDERING.md) — what the diagnostic window
+  shows, the OMSI-to-plan coordinate mapping, controls, content-root derivation,
+  failure behavior, limits, Windows validation.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — ownership boundary, integration
   decision, host lifecycle, build graph, platform backends, limitations.
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — SDK setup, submodule commands, macOS
@@ -178,15 +210,17 @@ are recorded in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Next milestone
 
-The immediate next step is the owner's Windows validation of `--world` against a
-legally installed Grundorf, so documented behavior can be separated from confirmed
-behavior.
+The immediate next step is the owner's Windows validation of `--map --render`
+against a legally installed Grundorf, so the diagnostic plan can be confirmed on real
+hardware and real data.
 
-Any Task 04 needs explicit approval and a separate scope. The narrowest useful
-candidate is the first visible scene built from verified world data, introducing
-asset loading and rendering in separately reviewable increments.
-No terrain mesh generation, spline tessellation, vehicle physics, world streaming,
-or OMSI scripting exists or is approved.
+Any Task 05 needs explicit approval and a separate scope. The narrowest useful
+candidate is real geometry in separately reviewable increments, and it has a hard
+prerequisite: the engine currently publishes no shader family, so actual OMSI
+scenery needs either an approved engine-level shader family or a reviewed shader
+build step in this repository, plus mesh decoding and reference resolution under the
+content root. Terrain mesh generation, spline tessellation, vehicle physics, world
+streaming, and OMSI scripting remain unapproved.
 
 ## License
 

@@ -26,13 +26,16 @@ internal sealed class HostOptions
     /// </summary>
     public const string UsageText =
         "Usage: Nymeria.OMSI [-h|--help] [--smoke] [--map <directory>] " +
-        "[--world <directory>]\n" +
+        "[--render] [--world <directory>]\n" +
         "  Opens a native window, initializes the Nymeria GPU device, presents\n" +
         "  cleared frames, and shuts down cleanly. It loads no OMSI content.\n" +
         "  --smoke            Present a fixed number of frames, then exit without input.\n" +
         "  --map <directory>  Inspect an OMSI map folder (the one containing\n" +
         "                     global.cfg): print its metadata, tile inventory, and\n" +
         "                     diagnostics. No window or GPU device is created.\n" +
+        "  --render           With --map: open the window and show a diagnostic\n" +
+        "                     plan of the parsed tiles and placements. OMSI scenery\n" +
+        "                     and terrain are not rendered.\n" +
         "  --world <directory>  Parse the same map folder's tile files and print a\n" +
         "                     bounded summary of object and spline placements. It\n" +
         "                     renders nothing and creates no window or GPU device.\n" +
@@ -42,12 +45,14 @@ internal sealed class HostOptions
         bool showHelp,
         int? maximumFrames,
         string? mapDirectory,
-        string? worldDirectory)
+        string? worldDirectory,
+        bool renderMap)
     {
         ShowHelp = showHelp;
         MaximumFrames = maximumFrames;
         MapDirectory = mapDirectory;
         WorldDirectory = worldDirectory;
+        RenderMap = renderMap;
     }
 
     /// <summary>
@@ -74,6 +79,12 @@ internal sealed class HostOptions
     public string? WorldDirectory { get; }
 
     /// <summary>
+    /// Gets a value indicating whether the parsed map should be shown in a window
+    /// instead of only reported.
+    /// </summary>
+    public bool RenderMap { get; }
+
+    /// <summary>
     /// Parses command-line arguments.
     /// </summary>
     /// <param name="arguments">The arguments passed to the process.</param>
@@ -91,6 +102,7 @@ internal sealed class HostOptions
         bool isSmokeRun = false;
         string? mapDirectory = null;
         string? worldDirectory = null;
+        bool renderMap = false;
 
         for (int index = 0; index < arguments.Count; index++)
         {
@@ -105,6 +117,10 @@ internal sealed class HostOptions
 
                 case "--smoke":
                     isSmokeRun = true;
+                    break;
+
+                case "--render":
+                    renderMap = true;
                     break;
 
                 case "--map":
@@ -178,11 +194,31 @@ internal sealed class HostOptions
             }
         }
 
-        if (isSmokeRun && mapDirectory is not null)
+        if (isSmokeRun && mapDirectory is not null && !renderMap)
         {
             return Fail(
-                "--smoke and --map cannot be combined: --map inspects " +
-                "configuration and diagnostics only, without presenting frames.",
+                "--smoke and --map cannot be combined without --render: --map on " +
+                "its own inspects configuration and diagnostics only, without " +
+                "presenting frames.",
+                out options,
+                out error);
+        }
+
+        if (renderMap && worldDirectory is not null)
+        {
+            return Fail(
+                "--render and --world cannot be combined: --world is the headless " +
+                "inspection of parsed placements, while --render shows them in a " +
+                "window.",
+                out options,
+                out error);
+        }
+
+        if (renderMap && mapDirectory is null)
+        {
+            return Fail(
+                "--render requires --map <directory>: there is no map to visualize " +
+                "otherwise.",
                 out options,
                 out error);
         }
@@ -210,7 +246,8 @@ internal sealed class HostOptions
             showHelp,
             isSmokeRun ? SmokeFrameCount : null,
             mapDirectory,
-            worldDirectory);
+            worldDirectory,
+            renderMap);
         error = null;
         return true;
     }
@@ -220,7 +257,7 @@ internal sealed class HostOptions
         out HostOptions options,
         out string? error)
     {
-        options = new HostOptions(false, null, null, null);
+        options = new HostOptions(false, null, null, null, false);
         error = message;
         return false;
     }

@@ -166,6 +166,7 @@ the attempt:
 | --- | --- |
 | `MapRoot`, `GlobalConfigPath` | The folder that was read and the configuration file used |
 | `Name`, `FriendlyName` | From `global.cfg`, or `null` when unavailable |
+| `UsesWorldCoordinates` | Whether `global.cfg` declared `[worldcoordinates]`, which changes the tile grid |
 | `Tiles` | One `OmsiWorldTile` per discovered tile, in manifest order |
 | `Diagnostics` | Map-level and per-tile warnings and errors, in discovery then tile order |
 | `Status` | `Complete`, `Partial`, or `Failed` |

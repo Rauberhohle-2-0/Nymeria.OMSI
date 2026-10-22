@@ -165,6 +165,7 @@ when the underlying check was not performed.
 | `src/Nymeria.OMSI/` | Host application: options, lifecycle, clear-frame presentation, diagnostics. |
 | `src/Nymeria.OMSI/Maps/` | Read-only OMSI map metadata discovery and configuration parsing; no engine or SDL types. |
 | `src/Nymeria.OMSI/World/` | Read-only OMSI tile-record parsing and the typed world model; no engine, SDL, or GPU types, and no resolved asset paths. |
+| `src/Nymeria.OMSI/Rendering/` | Diagnostic plan view of parsed map data: pure plan geometry, view math, CPU rasterizer, and the host-boundary GPU presenter that blits it. No OMSI scenery or terrain rendering. |
 | `tests/Nymeria.OMSI.Tests/` | Headless tests for GPU-free host code, the map metadata layer, and the tile/world layer (synthetic fixtures only). |
 | `external/Nymeria/` | Pinned engine submodule (read-only). |
 | `docs/` | Architecture, development, and map/world format documentation. |

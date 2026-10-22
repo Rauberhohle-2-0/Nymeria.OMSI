@@ -68,13 +68,13 @@ public sealed class HostOptionsTests
     public void UnknownArgumentIsRejectedWithItsName()
     {
         bool parsed = HostOptions.TryParse(
-            new[] { "--render", "Grundorf" },
+            new[] { "--visualize", "Grundorf" },
             out _,
             out string? error);
 
         Assert.False(parsed);
         Assert.NotNull(error);
-        Assert.Contains("--render", error, StringComparison.Ordinal);
+        Assert.Contains("--visualize", error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -201,10 +201,72 @@ public sealed class HostOptionsTests
     }
 
     [Fact]
+    public void RenderRequiresAMapAndIsOffByDefault()
+    {
+        bool parsed = HostOptions.TryParse(
+            Array.Empty<string>(),
+            out HostOptions plain,
+            out _);
+
+        Assert.True(parsed);
+        Assert.False(plain.RenderMap);
+
+        Assert.False(HostOptions.TryParse(
+            new[] { "--render" },
+            out _,
+            out string? error));
+        Assert.NotNull(error);
+        Assert.Contains("--render requires --map", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderIsAcceptedWithAMap()
+    {
+        bool parsed = HostOptions.TryParse(
+            new[] { "--map", "maps/TestMap", "--render" },
+            out HostOptions options,
+            out string? error);
+
+        Assert.True(parsed);
+        Assert.Null(error);
+        Assert.True(options.RenderMap);
+        Assert.Equal("maps/TestMap", options.MapDirectory);
+        Assert.Null(options.MaximumFrames);
+    }
+
+    [Fact]
+    public void SmokeCanBudgetARenderRun()
+    {
+        bool parsed = HostOptions.TryParse(
+            new[] { "--map", "maps/TestMap", "--render", "--smoke" },
+            out HostOptions options,
+            out string? error);
+
+        Assert.True(parsed);
+        Assert.Null(error);
+        Assert.True(options.RenderMap);
+        Assert.Equal(HostOptions.SmokeFrameCount, options.MaximumFrames);
+    }
+
+    [Fact]
+    public void RenderCannotBeCombinedWithWorldInspection()
+    {
+        bool parsed = HostOptions.TryParse(
+            new[] { "--world", "maps/TestMap", "--render" },
+            out _,
+            out string? error);
+
+        Assert.False(parsed);
+        Assert.NotNull(error);
+        Assert.Contains("cannot be combined", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void UsageTextDocumentsEverySupportedArgument()
     {
         Assert.Contains("--smoke", HostOptions.UsageText, StringComparison.Ordinal);
         Assert.Contains("--map", HostOptions.UsageText, StringComparison.Ordinal);
+        Assert.Contains("--render", HostOptions.UsageText, StringComparison.Ordinal);
         Assert.Contains("--world", HostOptions.UsageText, StringComparison.Ordinal);
         Assert.Contains("--help", HostOptions.UsageText, StringComparison.Ordinal);
     }

@@ -5,20 +5,20 @@ using SDL3;
 namespace Nymeria.Omsi;
 
 /// <summary>
-/// Owns the bootstrap host lifetime: one Nymeria window, one engine GPU device,
-/// and the frame loop that presents cleared frames.
+/// Owns the host lifetime: one Nymeria window, one engine GPU device, and the frame
+/// loop that presents frames from an <see cref="IFramePresenter"/>.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Every member runs on the process main thread because SDL windowing and the
 /// Nymeria GPU device require it. The window outlives the device: the device
 /// claims the window for presentation and releases that claim when disposed, so
-/// disposal happens device first.
+/// disposal happens presenter first, then device, then window.
 /// </para>
 /// <para>
-/// The host deliberately contains no OMSI parsing, no map loading, no scene, and
-/// no renderer abstraction. It exists to prove that the pinned engine dependency
-/// initializes, presents, and shuts down.
+/// The host deliberately contains no OMSI parsing, no map loading, no scene, and no
+/// renderer abstraction. It knows only how to create a window and a device, hand
+/// them to a presenter, run the loop, and shut everything down.
 /// </para>
 /// </remarks>
 internal sealed class OmsiHost : IDisposable
@@ -28,18 +28,25 @@ internal sealed class OmsiHost : IDisposable
 
     private readonly Window _window;
     private readonly GpuDevice _device;
-    private readonly ClearFramePresenter _presenter;
+    private readonly IFramePresenter _presenter;
+    private readonly int _interactiveEventWaitMilliseconds;
     private bool _disposed;
 
-    private OmsiHost(Window window, GpuDevice device, ClearFramePresenter presenter)
+    private OmsiHost(
+        Window window,
+        GpuDevice device,
+        IFramePresenter presenter,
+        int interactiveEventWaitMilliseconds)
     {
         _window = window;
         _device = device;
         _presenter = presenter;
+        _interactiveEventWaitMilliseconds = interactiveEventWaitMilliseconds;
     }
 
     /// <summary>
-    /// Creates the native window and the engine GPU device.
+    /// Creates the native window and the engine GPU device and presents cleared
+    /// frames.
     /// </summary>
     /// <returns>An initialized host that must be disposed on the main thread.</returns>
     /// <exception cref="InvalidOperationException">
@@ -48,23 +55,59 @@ internal sealed class OmsiHost : IDisposable
     /// </exception>
     public static OmsiHost Start()
     {
+        return Start(
+            HostOptions.WindowTitle,
+            static (window, device) => new ClearFramePresenter(window, device));
+    }
+
+    /// <summary>
+    /// Creates the native window and the engine GPU device and presents frames from
+    /// a caller-supplied presenter.
+    /// </summary>
+    /// <param name="windowTitle">The title of the native window.</param>
+    /// <param name="createPresenter">
+    /// Creates the presenter for the window handle and device just created. The
+    /// presenter is disposed before the device and the window.
+    /// </param>
+    /// <param name="interactiveEventWaitMilliseconds">
+    /// How long an interactive frame waits for an event. A presenter that animates
+    /// asks for a shorter wait so it keeps a steady frame rate.
+    /// </param>
+    /// <returns>An initialized host that must be disposed on the main thread.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// SDL video initialization, window creation, GPU device creation, or presenter
+    /// creation failed, including when the platform has no supported GPU backend.
+    /// </exception>
+    public static OmsiHost Start(
+        string windowTitle,
+        Func<IntPtr, GpuDevice, IFramePresenter> createPresenter,
+        int interactiveEventWaitMilliseconds = InteractiveEventWaitMilliseconds)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(windowTitle);
+        ArgumentNullException.ThrowIfNull(createPresenter);
+        ArgumentOutOfRangeException.ThrowIfNegative(interactiveEventWaitMilliseconds);
+
         Window? window = null;
         GpuDevice? device = null;
+        IFramePresenter? presenter = null;
 
         try
         {
-            window = Window.Create(new WindowOptions(HostOptions.WindowTitle));
+            window = Window.Create(new WindowOptions(windowTitle));
             device = GpuDevice.Create(window.Handle);
+            presenter = createPresenter(window.Handle, device);
 
             return new OmsiHost(
                 window,
                 device,
-                new ClearFramePresenter(window.Handle, device));
+                presenter,
+                interactiveEventWaitMilliseconds);
         }
         catch
         {
             // Dispose in the reverse order of creation so a failed start does not
             // leave SDL initialized or a window claimed.
+            presenter?.Dispose();
             device?.Dispose();
             window?.Dispose();
             throw;
@@ -116,7 +159,7 @@ internal sealed class OmsiHost : IDisposable
         }
 
         int eventWaitMilliseconds = maximumFrames is null
-            ? InteractiveEventWaitMilliseconds
+            ? _interactiveEventWaitMilliseconds
             : SmokeEventWaitMilliseconds;
 
         int presentedFrames = 0;
@@ -154,9 +197,32 @@ internal sealed class OmsiHost : IDisposable
 
         _disposed = true;
 
+        _presenter.Dispose();
         _device.Dispose();
         _window.Dispose();
     }
+}
+
+/// <summary>
+/// Presents one frame into a window claimed by the engine device.
+/// </summary>
+/// <remarks>
+/// The host owns the window and the device; a presenter owns only what it creates
+/// for its own frames and releases that when the host disposes it. This is a
+/// two-implementation seam (cleared frames and the diagnostic map plan), not a
+/// rendering abstraction: it deliberately exposes nothing about passes, pipelines,
+/// or resources.
+/// </remarks>
+internal interface IFramePresenter : IDisposable
+{
+    /// <summary>
+    /// Presents one frame.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when a frame was submitted for presentation, and
+    /// <see langword="false"/> when this frame had nothing to draw into.
+    /// </returns>
+    bool Present();
 }
 
 /// <summary>

@@ -104,6 +104,7 @@ public static class OmsiWorldLoader
             manifest.GlobalConfigPath,
             manifest.Name,
             manifest.FriendlyName,
+            manifest.UsesWorldCoordinates,
             tiles,
             diagnostics,
             status);

@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Nymeria.Omsi.Maps;
+using Nymeria.Omsi.Rendering;
 using Nymeria.Omsi.World;
 
 namespace Nymeria.Omsi;
@@ -14,7 +15,9 @@ namespace Nymeria.Omsi;
 /// reads only map configuration metadata and diagnostics, and with
 /// <c>--world &lt;directory&gt;</c> it additionally parses the tile files into a
 /// read-only world model. Neither inspection path creates a window, GPU device, or
-/// native SDL call.
+/// native SDL call. <c>--map &lt;directory&gt; --render</c> parses the same data and
+/// then opens the window to show a clearly labelled diagnostic plan of the parsed
+/// tiles and placements; it does not render OMSI scenery or terrain.
 /// </para>
 /// <para>
 /// It loads no OMSI assets, maps no terrain, and claims no OMSI runtime
@@ -49,7 +52,9 @@ internal static class Program
         {
             if (options.MapDirectory is not null)
             {
-                return RunMapInspection(options.MapDirectory);
+                return options.RenderMap
+                    ? RunMapRender(options.MapDirectory, options.MaximumFrames)
+                    : RunMapInspection(options.MapDirectory);
             }
 
             if (options.WorldDirectory is not null)
@@ -147,6 +152,78 @@ internal static class Program
         return manifest.Status == MapScanStatus.Failed
             ? ExitFailure
             : ExitSuccess;
+    }
+
+    private static int RunMapRender(string mapDirectory, int? maximumFrames)
+    {
+        // Parsing happens before any window or device exists, so a map that cannot
+        // be read fails with parser diagnostics instead of a GPU failure.
+        OmsiWorldModel world = OmsiWorldLoader.Load(mapDirectory);
+
+        if (world.Status == MapScanStatus.Failed)
+        {
+            WorldSummaryWriter.Write(Console.Out, world);
+            Console.Error.WriteLine(
+                "render: not started — the map produced no usable world data.");
+            return ExitFailure;
+        }
+
+        OmsiMapPlan plan = OmsiMapPlan.Create(world);
+
+        if (plan.Tiles.Count == 0)
+        {
+            WorldSummaryWriter.Write(Console.Out, world);
+            Console.Error.WriteLine(
+                "render: not started — the map has no discovered tile files, so " +
+                "there is nothing to visualize.");
+            return ExitFailure;
+        }
+
+        bool hasContentRoot = OmsiContentRoot.TryDerive(
+            world.MapRoot,
+            out string? contentRoot,
+            out string contentRootReason);
+
+        RenderSummaryWriter.Write(
+            Console.Out,
+            world,
+            plan,
+            hasContentRoot ? contentRoot : null,
+            contentRootReason);
+
+        string title =
+            $"Nymeria.OMSI — {world.Name ?? world.MapRoot} — diagnostic tile plan";
+
+        using (OmsiHost host = OmsiHost.Start(
+            title,
+            (window, device) => new DiagnosticMapPresenter(window, device, plan),
+            interactiveEventWaitMilliseconds: 16))
+        {
+            host.ReportDiagnostics(Console.Out);
+
+            HostRunResult result = host.Run(maximumFrames);
+
+            Console.WriteLine($"frames presented: {result.PresentedFrames}");
+
+            if (maximumFrames is null)
+            {
+                Console.WriteLine(
+                    result.QuitRequested
+                        ? "window closed by the user"
+                        : "frame loop ended without a quit request");
+            }
+            else
+            {
+                Console.WriteLine(
+                    result.QuitRequested
+                        ? "render run ended by a quit request"
+                        : "render run complete");
+            }
+        }
+
+        Console.WriteLine("shutdown: clean");
+
+        return ExitSuccess;
     }
 
     private static int RunWorldInspection(string mapDirectory)
