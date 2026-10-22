@@ -1,0 +1,19 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Nymeria.OMSI/Nymeria.OMSI.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Nymeria.OMSI.Tests/Nymeria.OMSI.Tests.csproj" />
+  </Folder>
+  <!--
+    The two engine projects this host consumes are listed so the solution's
+    configuration (Debug/Release) applies to them as well; a referenced project
+    that is absent from the solution would otherwise build with its own default
+    configuration. They are pinned by the submodule commit and must never be
+    edited from this repository. See docs/ARCHITECTURE.md.
+  -->
+  <Folder Name="/external/Nymeria/">
+    <Project Path="external/Nymeria/src/graphics/Nymeria.Graphics/Nymeria.Graphics.csproj" />
+    <Project Path="external/Nymeria/src/platform/Nymeria.Platform/Nymeria.Platform.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,3 @@
+[submodule "external/Nymeria"]
+	path = external/Nymeria
+	url = https://github.com/Rauberhohle-2-0/Nymeria.git

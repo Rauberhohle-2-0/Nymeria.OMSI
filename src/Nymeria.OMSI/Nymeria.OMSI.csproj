@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Nymeria.Omsi</RootNamespace>
+    <AssemblyName>Nymeria.OMSI</AssemblyName>
+  </PropertyGroup>
+
+  <!--
+    The engine is consumed as a pinned Git submodule (see docs/ARCHITECTURE.md).
+    These project references are the only engine dependency. The submodule is
+    read-only from this repository's perspective: never edit files under
+    external/Nymeria, and never add engine source to src/.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../../external/Nymeria/src/platform/Nymeria.Platform/Nymeria.Platform.csproj" />
+    <ProjectReference Include="../../external/Nymeria/src/graphics/Nymeria.Graphics/Nymeria.Graphics.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Host options are GPU-free, so their parsing is unit-tested without SDL. -->
+    <InternalsVisibleTo Include="Nymeria.OMSI.Tests" />
+  </ItemGroup>
+
+</Project>

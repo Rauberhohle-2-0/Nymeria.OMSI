@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# Least privilege: everything here only reads the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  commit-policy:
+    name: Commit policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          # The attribution check needs every superproject commit of the change,
+          # which a shallow checkout cannot resolve. Submodules are deliberately
+          # not initialized: engine history is never part of this check.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine the checked commit range
+        id: range
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_AFTER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            # Start at the merge base so commits that already exist on the base
+            # branch are never attributed to this pull request.
+            base="$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"
+            echo "range=${base}..${PR_HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          elif [[ -n "$PUSH_BEFORE_SHA" && ! "$PUSH_BEFORE_SHA" =~ ^0+$ ]]; then
+            echo "range=${PUSH_BEFORE_SHA}..${PUSH_AFTER_SHA}" >> "$GITHUB_OUTPUT"
+          else
+            # A first push to a branch has no parent range.
+            echo "range=--head" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Reject newly introduced attribution trailers
+        shell: bash
+        env:
+          RANGE: ${{ steps.range.outputs.range }}
+        run: scripts/check-commit-trailers.sh "$RANGE"
+
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Only the two supported development/CI platforms. No runtime (GUI, GPU,
+        # audio) check runs here, and no OMSI assets are involved.
+        os:
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Check out repository with the pinned engine
+        uses: actions/checkout@v4
+        with:
+          # The engine is a pinned submodule. It is checked out at the commit the
+          # superproject records; nothing follows a branch.
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Verify the engine checkout matches the recorded pin
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          recorded="$(git rev-parse HEAD:external/Nymeria)"
+          checked_out="$(git -C external/Nymeria rev-parse HEAD)"
+          echo "recorded engine commit:   $recorded"
+          echo "checked-out engine commit: $checked_out"
+
+          if [[ "$recorded" != "$checked_out" ]]; then
+            echo "::error::The engine checkout is not at the pinned commit."
+            exit 1
+          fi
+
+          if [[ -n "$(git -C external/Nymeria status --porcelain)" ]]; then
+            echo "::error::The engine checkout has local changes. Engine changes belong in the Nymeria repository."
+            exit 1
+          fi
+
+      - name: Restore
+        run: dotnet restore Nymeria.OMSI.slnx
+
+      - name: Build
+        run: dotnet build Nymeria.OMSI.slnx --configuration Release --no-restore
+
+      - name: Test (headless, asset-independent)
+        run: dotnet test Nymeria.OMSI.slnx --configuration Release --no-build --no-restore
