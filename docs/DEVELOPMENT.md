@@ -43,9 +43,13 @@ Always name the platform. "Builds" is not a platform.
 - .NET SDK **10.0.402**, pinned by [global.json](../global.json). `dotnet --version`
   must report `10.0.402`. `rollForward: latestPatch` allows a later patch of the
   same feature band; no other SDK is tested.
-- No SDL3 installation, no DirectX Shader Compiler, and no Xcode shader toolchain
-  is required. Native SDL3 comes from the NuGet packages that
-  `Nymeria.Platform` references.
+- No SDL3 installation and no Xcode shader toolchain is required. Native SDL3 comes
+  from the NuGet packages that `Nymeria.Platform` references.
+- On Windows, the terrain DXIL shaders need Microsoft's DirectX Shader Compiler. The
+  build provisions a pinned, SHA-256-verified release into a per-user cache the first
+  time it is needed, so nothing has to be installed by hand. Set
+  `-p:DxcPath="<path>\dxc.exe"` to use a compiler you already have, or put `dxc` on
+  `PATH`. macOS never invokes a shader compiler.
 
 The engine is a Git submodule pinned to one commit. It is **not** a branch and it
 is not self-updating.
@@ -110,22 +114,28 @@ Notes:
 - Builds are warning-free by policy: `TreatWarningsAsErrors` is enabled in
   [Directory.Build.props](../Directory.Build.props) for this repository's
   projects, and the engine keeps its own settings.
-- The test project runs 154 headless tests. They cover command-line parsing, the
+- The test project runs 193 headless tests. They cover command-line parsing, the
   GPU-free map metadata layer (text encoding selection and fallbacks, keyword-block
   tokenizing, tile file-name parsing, discovery ordering, duplicates, unsupported
   directives, summary output), the GPU-free tile/world layer (record layouts by
   tile version, keyword-like and empty labels, truncated records, malformed numbers,
   duplicate identifiers, missing versions, uninterpreted record counting, terrain
-  size checks, status transitions, summary truncation), and the GPU-free plan layer
+  size checks, status transitions, summary truncation), the GPU-free plan layer
   (tile origins and both grids, placement offsets, bounds, skipped and omitted
   placements, view framing and clamping, rasterizer colors and determinism,
-  content-root derivation, aspect fit, render summary). They create no window, no
-  GPU device, and no audio device, and they use only synthetic strings written by
-  the tests.
-- The host itself, including `--map`, `--world`, and `--render`, is **not** executed
-  on macOS in any task. `dotnet build` and the tests prove compilation and parser
-  behavior, nothing more. A passing tile or plan test is not evidence of
-  OMSI/Grundorf compatibility, and it does not exercise the GPU blit path.
+  content-root derivation, aspect fit, render summary), and the GPU-free terrain
+  layer (documented sidecar length and header, row-major sample order, rejection of
+  truncated, non-finite, and implausible data, per-tile vertex and triangle counts,
+  counter-clockwise winding, 5 m spacing, elevation transfer, normals, tile-edge
+  continuity, merged index offsets, the vertex layout, the colour ramp, camera
+  framing and frame-rate independence, and the embedded Metal shader resource). They
+  create no window, no GPU device, and no audio device, and they use only synthetic
+  strings and byte arrays written by the tests.
+- The host itself, including `--map`, `--world`, `--render`, and `--terrain-3d`, is
+  **not** executed on macOS in any task. `dotnet build` and the tests prove
+  compilation, parser, decoder, and geometry behavior, nothing more. A passing tile,
+  plan, or terrain test is not evidence of OMSI/Grundorf compatibility, and it does
+  not exercise the GPU blit or draw path, the DXIL shaders, or the pipeline.
 
 Optional formatting check, if `dotnet format` is available in the pinned SDK:
 
@@ -143,13 +153,18 @@ dotnet format Nymeria.OMSI.slnx --verify-no-changes --no-restore
 - A portable build keeps every RID under `runtimes/<rid>/native/`; the .NET host
   resolves the matching one. A RID-specific build (`-r win-x64`) copies only that
   binary beside the executable.
-- The bootstrap host uses **no shader assets**. A frame is a clear-only render
-  pass, so no MSL source and no DXIL bytecode is needed and the DirectX Shader
-  Compiler is never invoked. Nymeria's DXC provisioning lives in its `examples/`
-  tree and is example-owned; do not copy it here.
-- When a later task needs shaders, they must come from an approved engine-level
-  shader family in Nymeria or from a reviewed shader build step in this
-  repository. Never copy example shaders or duplicate the DXC pipeline.
+- The bootstrap path uses **no shader assets**: a cleared frame is a render pass with
+  nothing bound, so no MSL source and no DXIL bytecode is needed.
+- The 3D terrain mode uses this repository's own shaders in
+  `src/Nymeria.OMSI/Shaders/`: `Terrain.metal` is embedded as source and compiled by
+  SDL when the shaders are created, and `Terrain.hlsl` is compiled to DXIL during a
+  Windows build and embedded as bytecode. `Shaders/DxilShaders.targets` performs that
+  step with a pinned, checksum-verified DirectX Shader Compiler; generated `.dxil`
+  files live under `obj/` and are never committed. Nymeria's own DXC provisioning is
+  example-owned and is not imported or copied here.
+- Any further shader must follow the same route: this repository's own source plus
+  that reviewed build step, or an engine-level shader family proposed upstream. Never
+  copy example shaders or duplicate the DXC pipeline outside it.
 
 ### Troubleshooting
 
@@ -171,6 +186,11 @@ dotnet format Nymeria.OMSI.slnx --verify-no-changes --no-restore
 | `--render` reports `render: not started` | The map produced no usable world data, so there is nothing to draw. Run `--world` on the same folder for the per-tile diagnostics. |
 | `--render` opens a window but it stays empty | The plan is drawn with SDL's blit command, not a shader. Check the console for the engine line and any error; report the window size, the driver line, and whether `plan:` reported any tiles or markers. |
 | `--render` reports `content root: (unresolved: ...)` | The map folder is not inside a folder named `maps`. This milestone loads no asset, so rendering still works; a later asset loader will require a resolvable root. |
+| Windows build fails provisioning the DirectX Shader Compiler, or `DxcPath` is rejected | The archive could not be downloaded, failed its SHA-256 check, or the path is wrong. Work offline with `-p:DxcPath="<path>\dxc.exe"`, or put `dxc` on `PATH`. Do not disable the checksum check. |
+| `--terrain-3d` reports `status: failed` before a window opens | Not one discovered tile could be interpreted, so there is no terrain to place. Run `--world` on the same folder for the per-tile diagnostics. |
+| `--terrain-3d` reports `terrain: not started — no tile produced a decoded height grid` | Every sidecar was missing or rejected. The terrain diagnostics name each file and the reason; a file of another size or header is a finding to report, not something to work around. |
+| `--terrain-3d` reports rejected sidecars | The decoder only accepts the documented `u32 (=60)` + 61 x 61 `f32` layout. Report the file size, the header value, and the diagnostic rather than editing the map. |
+| The terrain window is black or empty | Check the console's `engine:` line and any error. A black frame with `geometry:` reporting triangles is a GPU-side finding: report the driver line, depth format availability, window size, and whether the window was resized. |
 
 ## Continuous integration
 
@@ -213,8 +233,9 @@ results as described at the end.
    dotnet restore Nymeria.OMSI.slnx
    dotnet build Nymeria.OMSI.slnx --configuration Release --no-restore
    ```
-   Expect `0 Warning(s)`, `0 Error(s)`. No shader compiler is downloaded; the host
-   has no shaders.
+   Expect `0 Warning(s)`, `0 Error(s)`. The first build downloads and verifies the
+   pinned DirectX Shader Compiler once, prints a line naming it, and compiles
+   `Shaders/Terrain.hlsl` to DXIL; later builds reuse the per-user cache.
 4. Confirm the native library is deployed. Either
    `src\Nymeria.OMSI\bin\Release\net10.0\runtimes\win-x64\native\SDL3.dll` exists
    (use `win-arm64` on arm64), or `SDL3.dll` sits beside `Nymeria.OMSI.exe` after a
@@ -325,8 +346,35 @@ its configuration metadata.
    The full checklist, including the `[worldcoordinates]` case, is in
    [OMSI_RENDERING.md](OMSI_RENDERING.md#on-windows-owner).
 
-   The host's other five steps need no OMSI assets; these three need only the
-   owner's legally installed map folder.
+8. **3D terrain (Task 05).** Decode the same map's terrain and open the 3D view:
+   ```bat
+   src\Nymeria.OMSI\bin\Release\net10.0\Nymeria.OMSI.exe --map "C:\Program Files (x86)\Steam\steamapps\common\OMSI 2\maps\Grundorf" --terrain-3d
+   ```
+   Expected: the build has already provisioned the DirectX Shader Compiler once; the
+   console summary says `terrain: 3D terrain only` and reports every sidecar as
+   decoded with none rejected; the window title ends in `3D terrain only` and shows a
+   continuous, shaded, three-dimensional surface rather than a flat plane or a plan.
+   `W/A/S/D`, `Space`/`Ctrl`, `Shift`, the right mouse button, and `R` respond, and
+   closing the window prints `frames presented:`, `window closed by the user`, and
+   `shutdown: clean` with exit code 0. A black frame, a gap between tiles, or a hang is
+   a `FAIL`.
+
+   Repeat without a human at the keyboard:
+   ```bat
+   src\Nymeria.OMSI\bin\Release\net10.0\Nymeria.OMSI.exe --map "C:\Program Files (x86)\Steam\steamapps\common\OMSI 2\maps\Grundorf" --terrain-3d --smoke
+   ```
+   Expected: 120 frames, `terrain run complete`, `shutdown: clean`, exit code `0`.
+
+   Also compare the terrain's shape and orientation with OMSI. The grid's row
+   orientation is an assumption recorded in
+   [OMSI_TERRAIN_3D.md](OMSI_TERRAIN_3D.md#documented-versus-assumed), and this run is
+   the only way to settle it. Report whether the ground is mirrored along an axis.
+
+   The full checklist is in
+   [OMSI_TERRAIN_3D.md](OMSI_TERRAIN_3D.md#on-windows-owner).
+
+   The host's other five steps need no OMSI assets; these four need only the owner's
+   legally installed map folder.
 
 ### If something fails
 
@@ -344,6 +392,10 @@ Report, in the task report or issue:
 - For `--render`: the full console summary, the window title, the `engine:` line,
   what the plan looked like (tiles and markers visible or not), whether panning and
   zooming stayed responsive, and how the window closed.
+- For `--terrain-3d`: the full console summary, the window title, the `engine:` line,
+  the decoded/rejected sidecar counts and every terrain diagnostic, what the surface
+  looked like (continuous, gaps, mirrored, flat), whether the camera controls stayed
+  responsive and felt frame-rate independent, and how the window closed.
 
 Keep Windows runtime results authoritative: if the owner reports a `FAIL`, the
 milestone is not verification-complete even when macOS builds and CI are green.

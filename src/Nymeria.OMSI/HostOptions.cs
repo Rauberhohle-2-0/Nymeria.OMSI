@@ -26,7 +26,7 @@ internal sealed class HostOptions
     /// </summary>
     public const string UsageText =
         "Usage: Nymeria.OMSI [-h|--help] [--smoke] [--map <directory>] " +
-        "[--render] [--world <directory>]\n" +
+        "[--render | --terrain-3d] [--world <directory>]\n" +
         "  Opens a native window, initializes the Nymeria GPU device, presents\n" +
         "  cleared frames, and shuts down cleanly. It loads no OMSI content.\n" +
         "  --smoke            Present a fixed number of frames, then exit without input.\n" +
@@ -36,6 +36,11 @@ internal sealed class HostOptions
         "  --render           With --map: open the window and show a diagnostic\n" +
         "                     plan of the parsed tiles and placements. OMSI scenery\n" +
         "                     and terrain are not rendered.\n" +
+        "  --terrain-3d       With --map: decode each tile's terrain heights and open\n" +
+        "                     a 3D view of the resulting terrain mesh. Scenery, splines,\n" +
+        "                     and ground textures are not rendered. Controls: W/A/S/D\n" +
+        "                     move, Space/Ctrl up/down, Shift faster, right mouse button\n" +
+        "                     and mouse look, R resets the view.\n" +
         "  --world <directory>  Parse the same map folder's tile files and print a\n" +
         "                     bounded summary of object and spline placements. It\n" +
         "                     renders nothing and creates no window or GPU device.\n" +
@@ -46,13 +51,15 @@ internal sealed class HostOptions
         int? maximumFrames,
         string? mapDirectory,
         string? worldDirectory,
-        bool renderMap)
+        bool renderMap,
+        bool terrain3D)
     {
         ShowHelp = showHelp;
         MaximumFrames = maximumFrames;
         MapDirectory = mapDirectory;
         WorldDirectory = worldDirectory;
         RenderMap = renderMap;
+        Terrain3D = terrain3D;
     }
 
     /// <summary>
@@ -85,6 +92,12 @@ internal sealed class HostOptions
     public bool RenderMap { get; }
 
     /// <summary>
+    /// Gets a value indicating whether the map's decoded terrain should be shown in a
+    /// 3D window instead of the diagnostic plan.
+    /// </summary>
+    public bool Terrain3D { get; }
+
+    /// <summary>
     /// Parses command-line arguments.
     /// </summary>
     /// <param name="arguments">The arguments passed to the process.</param>
@@ -103,6 +116,7 @@ internal sealed class HostOptions
         string? mapDirectory = null;
         string? worldDirectory = null;
         bool renderMap = false;
+        bool terrain3D = false;
 
         for (int index = 0; index < arguments.Count; index++)
         {
@@ -121,6 +135,10 @@ internal sealed class HostOptions
 
                 case "--render":
                     renderMap = true;
+                    break;
+
+                case "--terrain-3d":
+                    terrain3D = true;
                     break;
 
                 case "--map":
@@ -194,12 +212,12 @@ internal sealed class HostOptions
             }
         }
 
-        if (isSmokeRun && mapDirectory is not null && !renderMap)
+        if (isSmokeRun && mapDirectory is not null && !renderMap && !terrain3D)
         {
             return Fail(
-                "--smoke and --map cannot be combined without --render: --map on " +
-                "its own inspects configuration and diagnostics only, without " +
-                "presenting frames.",
+                "--smoke and --map cannot be combined without --render or " +
+                "--terrain-3d: --map on its own inspects configuration and " +
+                "diagnostics only, without presenting frames.",
                 out options,
                 out error);
         }
@@ -242,12 +260,41 @@ internal sealed class HostOptions
                 out error);
         }
 
+        if (terrain3D && renderMap)
+        {
+            return Fail(
+                "--render and --terrain-3d cannot be combined: --render shows the " +
+                "2D diagnostic plan, while --terrain-3d shows the decoded terrain in " +
+                "3D. Pick one view.",
+                out options,
+                out error);
+        }
+
+        if (terrain3D && worldDirectory is not null)
+        {
+            return Fail(
+                "--terrain-3d and --world cannot be combined: --world parses tile " +
+                "placements only, without decoding terrain or presenting frames.",
+                out options,
+                out error);
+        }
+
+        if (terrain3D && mapDirectory is null)
+        {
+            return Fail(
+                "--terrain-3d requires --map <directory>: there is no terrain to " +
+                "decode otherwise.",
+                out options,
+                out error);
+        }
+
         options = new HostOptions(
             showHelp,
             isSmokeRun ? SmokeFrameCount : null,
             mapDirectory,
             worldDirectory,
-            renderMap);
+            renderMap,
+            terrain3D);
         error = null;
         return true;
     }
@@ -257,7 +304,7 @@ internal sealed class HostOptions
         out HostOptions options,
         out string? error)
     {
-        options = new HostOptions(false, null, null, null, false);
+        options = new HostOptions(false, null, null, null, false, false);
         error = message;
         return false;
     }

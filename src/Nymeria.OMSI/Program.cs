@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Nymeria.Omsi.Maps;
 using Nymeria.Omsi.Rendering;
+using Nymeria.Omsi.Terrain;
 using Nymeria.Omsi.World;
 
 namespace Nymeria.Omsi;
@@ -18,6 +19,9 @@ namespace Nymeria.Omsi;
 /// native SDL call. <c>--map &lt;directory&gt; --render</c> parses the same data and
 /// then opens the window to show a clearly labelled diagnostic plan of the parsed
 /// tiles and placements; it does not render OMSI scenery or terrain.
+/// <c>--map &lt;directory&gt; --terrain-3d</c> decodes each tile's documented terrain
+/// sidecar and opens a 3D view of the resulting mesh with a free-fly camera. It
+/// renders terrain and nothing else: no scenery, splines, or ground textures.
 /// </para>
 /// <para>
 /// It loads no OMSI assets, maps no terrain, and claims no OMSI runtime
@@ -52,6 +56,11 @@ internal static class Program
         {
             if (options.MapDirectory is not null)
             {
+                if (options.Terrain3D)
+                {
+                    return RunTerrainRender(options.MapDirectory, options.MaximumFrames);
+                }
+
                 return options.RenderMap
                     ? RunMapRender(options.MapDirectory, options.MaximumFrames)
                     : RunMapInspection(options.MapDirectory);
@@ -218,6 +227,69 @@ internal static class Program
                     result.QuitRequested
                         ? "render run ended by a quit request"
                         : "render run complete");
+            }
+        }
+
+        Console.WriteLine("shutdown: clean");
+
+        return ExitSuccess;
+    }
+
+    private static int RunTerrainRender(string mapDirectory, int? maximumFrames)
+    {
+        // Parsing and decoding happen before any window or device exists, so a map
+        // that cannot be read or has no decodable terrain fails with parser
+        // diagnostics instead of a GPU failure or an empty window.
+        OmsiWorldModel world = OmsiWorldLoader.Load(mapDirectory);
+
+        if (world.Status == MapScanStatus.Failed)
+        {
+            WorldSummaryWriter.Write(Console.Out, world);
+            Console.Error.WriteLine(
+                "terrain: not started — the map produced no usable world data.");
+            return ExitFailure;
+        }
+
+        OmsiTerrainSet terrain = OmsiTerrainSet.Load(world);
+        OmsiTerrainModel model = OmsiTerrainModel.Create(terrain);
+
+        TerrainSummaryWriter.Write(Console.Out, world, terrain, model);
+
+        if (model.Bounds is null)
+        {
+            Console.Error.WriteLine(
+                "terrain: not started — no tile produced a decoded height grid, so " +
+                "there is no terrain to draw. The terrain diagnostics above say why.");
+            return ExitFailure;
+        }
+
+        string title =
+            $"Nymeria.OMSI — {world.Name ?? world.MapRoot} — 3D terrain only";
+
+        using (OmsiHost host = OmsiHost.Start(
+            title,
+            (window, device) => TerrainPresenter.Create(window, device, model),
+            interactiveEventWaitMilliseconds: 16))
+        {
+            host.ReportDiagnostics(Console.Out);
+
+            HostRunResult result = host.Run(maximumFrames);
+
+            Console.WriteLine($"frames presented: {result.PresentedFrames}");
+
+            if (maximumFrames is null)
+            {
+                Console.WriteLine(
+                    result.QuitRequested
+                        ? "window closed by the user"
+                        : "frame loop ended without a quit request");
+            }
+            else
+            {
+                Console.WriteLine(
+                    result.QuitRequested
+                        ? "terrain run ended by a quit request"
+                        : "terrain run complete");
             }
         }
 

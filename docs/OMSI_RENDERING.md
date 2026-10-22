@@ -18,9 +18,9 @@ pending)`.
 - one small marker per parsed object placement;
 - one small marker per parsed spline placement.
 
-That is all. There is **no** terrain surface, no object mesh, no spline curve, no
-texture, no lighting, and no height. The window title and the console summary both
-say so, and the console prints:
+That is all. In this mode there is **no** terrain surface, no object mesh, no spline
+curve, no texture, no lighting, and no height. The window title and the console
+summary both say so, and the console prints:
 
 ```text
 render: diagnostic tile plan (OMSI scenery and terrain are not rendered)
@@ -30,25 +30,24 @@ The plan is a truthful picture of parser output: a marker means a record was
 parsed, and its position means the record's documented x/y. It is **not** a picture
 of Grundorf, and it must not be described as one.
 
-### Why not real geometry yet
+### Why this mode shows no real geometry
 
-Nymeria publishes no scene renderer, no mesh upload path, and no shader family. The
-GPU renderers and shaders in the engine live under `examples/`, are example-owned,
-and cannot be copied into this repository. Direct3D 12 needs precompiled DXIL, which
-would require provisioning the DirectX Shader Compiler here — a dependency decision,
-not an implementation detail.
+This mode is a CPU rasterized plan. It has no mesh, no pipeline, and no shader, and
+Task OMSI-04 deliberately added none. Rendering actual geometry needed pieces that
+did not exist when this mode was written:
 
-The world layer of OMSI-03 also produces no meshes: it yields placements and
-references, and terrain heights are deliberately not decoded. Rendering actual
-scenery therefore needs three separate, reviewable pieces of work:
-
-1. an approved engine-level shader family (or a reviewed shader build step here),
+1. an approved engine-level shader family, or a reviewed shader build step in this
+   repository,
 2. an asset loader that decodes `.sco`/`.o3d`-referenced meshes and resolves
    references under the content root,
 3. terrain height decoding and a terrain mesh.
 
-Task OMSI-04 does none of those. It connects the parser to the application host and
-makes the parsed data visible, which is the first vertical slice.
+Piece 1 and piece 3 exist as of Task 05, but only for terrain, in a **separate mode**:
+`--map <directory> --terrain-3d` decodes the `.map.terrain` sidecars and draws them
+through the engine device with this repository's own HLSL and Metal shaders. See
+[docs/OMSI_TERRAIN_3D.md](OMSI_TERRAIN_3D.md). This document keeps describing the plan
+mode, which is unchanged and still draws no terrain. Piece 2 is still missing, so no
+scenery object, spline, or texture appears in either mode.
 
 ## How the frame is produced
 
@@ -92,7 +91,7 @@ The plan uses OMSI's own map plane, in metres, with no rotation and no unit chan
 | Object/spline `x` (tile-local) | Plan x = tile column x edge + `x` |
 | Object/spline `y` (tile-local) | Plan y = tile row x edge + `y` |
 | Object `z`, heading, pitch, bank | Read by the parser, **not** used by the plan |
-| Terrain heights | Not decoded, not drawn |
+| Terrain heights | Not decoded and not drawn by this mode; `--terrain-3d` decodes them in the terrain mode |
 
 Screen mapping:
 
@@ -288,9 +287,12 @@ black window with a clean shutdown is a failure to report, not a pass.
 ## Deliberately not implemented
 
 - OMSI scenery, object meshes, textures, materials, and spline curves.
-- Terrain heights, terrain meshes, light maps, water, and terrain holes.
+- Terrain in this mode: heights, meshes, light maps, water, and terrain holes. The
+  separate `--terrain-3d` mode draws decoded terrain only; see
+  [OMSI_TERRAIN_3D.md](OMSI_TERRAIN_3D.md).
 - Asset loading, reference resolution, and any `.sco`/`.o3d`/`.sli` decoding.
-- A shader family, a pipeline, a DXC build step, or a second renderer.
+- A shader family, a pipeline, or a DXC build step for this mode, and any second
+  renderer. The terrain mode owns the repository's only shaders.
 - Vehicles, traffic, timetables, scripts, audio, physics, streaming, culling, and
   dynamic shadows.
 - Any write to the OMSI installation, and any bundled OMSI asset.

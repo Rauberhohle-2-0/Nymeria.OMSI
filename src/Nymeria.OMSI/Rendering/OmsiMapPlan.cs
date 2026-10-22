@@ -90,14 +90,15 @@ internal readonly record struct PlanBounds(double MinX, double MinY, double MaxX
 internal sealed class OmsiMapPlan
 {
     /// <summary>The documented tile edge of a metre map.</summary>
-    internal const double DocumentedTileEdgeMeters = 300.0;
+    internal const double DocumentedTileEdgeMeters = OmsiTileGrid.DocumentedTileEdgeMeters;
 
     /// <summary>
     /// The tile edge the reference measured for a <c>[worldcoordinates]</c> map
     /// (1/300 degree, 371.9 m on both axes). It is a measurement, not a documented
     /// constant, so it is reported as unverified.
     /// </summary>
-    internal const double WorldCoordinateTileEdgeMeters = 371.9;
+    internal const double WorldCoordinateTileEdgeMeters =
+        OmsiTileGrid.WorldCoordinateTileEdgeMeters;
 
     /// <summary>
     /// The largest number of points drawn per category. A malformed or enormous map
@@ -192,9 +193,7 @@ internal sealed class OmsiMapPlan
     {
         ArgumentNullException.ThrowIfNull(world);
 
-        double edge = world.UsesWorldCoordinates
-            ? WorldCoordinateTileEdgeMeters
-            : DocumentedTileEdgeMeters;
+        double edge = OmsiTileGrid.EdgeMeters(world.UsesWorldCoordinates);
 
         var tiles = new List<PlanRect>(world.Tiles.Count);
         var objects = new List<PlanPoint>();
@@ -289,7 +288,7 @@ internal sealed class OmsiMapPlan
 
         return new OmsiMapPlan(
             edge,
-            !world.UsesWorldCoordinates,
+            OmsiTileGrid.UsesDocumentedEdge(world.UsesWorldCoordinates),
             tiles,
             objects,
             splines,

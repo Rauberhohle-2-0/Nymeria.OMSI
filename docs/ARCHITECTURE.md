@@ -132,10 +132,15 @@ are covered by Nymeria's own tests where they are GPU-free.
 | `GpuDevice.DriverName`, `ShaderFormat`, `SwapchainFormat` | Reported by the host diagnostics. | Values describe the device that was created, not a request. |
 | `GpuDevice.Handle` | Native `SDL_GPUDevice*` used by the host's presentation code. | The device owns it. |
 | `GpuDevice.Dispose()` | Waits for GPU idle, releases the window claim, destroys the device. | Dispose the device before the window. |
+| `GpuDevice.CreateTexture(...)` | Uploads the diagnostic plan image once per view change. | Caller releases; uploads once, never per frame. |
+| `GpuDevice.CreateShader(...)` | Creates this repository's terrain vertex and fragment shaders in the device's format. | Rejects bytes labelled with a format the device does not use. |
+| `GpuDevice.CreateBuffer(...)` | Uploads the one terrain vertex buffer and one index buffer. | Caller releases; one upload per buffer. |
+| `Nymeria.Graphics.ShaderProgram.Select`, `ShaderAsset.ReadBytes` | Maps a shader-family prefix to the per-format resource names and entry points and reads them from this assembly. | Nymeria ships no shader family for consumers; the terrain shaders are this repository's own. |
+| `Nymeria.Graphics.Camera` | Terrain view and projection matrices. | Right-handed, +Y up, looks down -Z at zero yaw; validates its own state. |
 
 Everything else in Nymeria (`Core`, `Formats.*`, `Audio`, scene, lighting,
-culling, LOD, streaming, picking, collision, animation) is intentionally unused in
-this milestone.
+culling, LOD, streaming, picking, collision, animation) is intentionally unused by
+this host.
 
 ## Host lifecycle
 
@@ -198,7 +203,9 @@ or a new, reviewed shader build step in this repository. Task 01 does neither.
 The presentation code is host-boundary code by design: Nymeria exposes the native
 `SDL_GPUDevice*` handle specifically so a host can record its own passes, and every
 engine example does the same. It is not a rendering abstraction, it is not a
-platform layer, and it must not grow into one.
+platform layer, and it must not grow into one. Task 05's terrain presenter follows
+the same rule and adds this repository's own shaders; see
+[3D terrain mode](#3d-terrain-mode).
 
 ## OMSI map metadata layer
 
@@ -280,10 +287,68 @@ Rules that keep the boundary intact:
   this document all call the view diagnostic. It is never described as rendering the
   map.
 
-Not in this mode, and not approved: terrain meshes, object or spline geometry,
+Not in this mode, and not approved here: terrain meshes, object or spline geometry,
 asset loading, reference resolution, lighting, and any scene graph. Real OMSI
 geometry needs an approved engine-level shader family (or a reviewed shader build
-step here), plus mesh decoding and an asset loader — separate tasks.
+step here), plus mesh decoding and an asset loader — separate tasks. Task 05 adds
+terrain meshes and the shader build step; scenery geometry is still absent.
+
+## 3D terrain mode
+
+The terrain mode added by Task 05 lives in `src/Nymeria.OMSI/Terrain/` (decoding and
+geometry, GPU-free) and `src/Nymeria.OMSI/Rendering/TerrainPresenter.cs` (the
+host-boundary draw). Its contract is [docs/OMSI_TERRAIN_3D.md](OMSI_TERRAIN_3D.md);
+this section records only the boundary.
+
+```text
+OmsiWorldTile + <tile>.map.terrain
+        │
+        ▼
+OmsiTerrainDecoder ──► OmsiTerrainHeightmap   61 x 61 f32 metres, GPU-free
+        │
+        ▼
+TerrainMeshBuilder ──► TerrainMesh (per tile)   positions, normals, CCW indices
+        │
+        ▼
+OmsiTerrainModel ──► one vertex buffer + one index buffer
+        │
+        ▼
+TerrainPresenter: GpuDevice.CreateBuffer + CreateShader + one depth-tested draw
+```
+
+Rules that keep the boundary intact:
+
+- **The decoder validates instead of assuming.** Only the documented layout is
+  accepted: a `u32` header of 60, then 61 x 61 little-endian `f32` heights, 14,888
+  bytes. Another length, another header, a non-finite height, or an implausible
+  magnitude rejects that tile with a diagnostic that names the sample. No geometry is
+  substituted for rejected or missing terrain.
+- **Terrain is parser output, not a scene.** A height grid holds numbers; the mesh
+  builder turns them into positions and normals and nothing else. No scenery object,
+  spline, texture, light, or OMSI scene graph is created, and no asset reference is
+  resolved.
+- **One coordinate mapping, shared with the plan view.** `world x = OMSI x`,
+  `world y = height`, `world z = -OMSI y`, with +Y up to match the engine camera. The
+  tile edge comes from `OmsiTileGrid`, the same type the plan view reads, so the two
+  views cannot disagree about where a tile is. Compass orientation of the OMSI axes is
+  asserted nowhere.
+- **The engine still owns the device and the camera.** The presenter uses
+  `GpuDevice.CreateShader`, `CreateBuffer`, and the native device handle exactly as
+  the engine's examples do; the view and projection matrices come from
+  `Nymeria.Graphics.Camera`. `IFramePresenter` stays a two-implementation seam
+  (cleared frames / diagnostic plan) plus this third presenter, not an abstraction
+  over passes or resources.
+- **Shaders are this repository's own, with a reviewed build step.** Nymeria ships no
+  shader family for consumers, so `src/Nymeria.OMSI/Shaders/` holds hand-written HLSL
+  and MSL and `DxilShaders.targets` provisions a pinned, checksum-verified DirectX
+  Shader Compiler on Windows. No engine example shader or asset is copied, and no
+  engine project is modified.
+- **Honest labelling.** The window title and the first console line say the view is
+  3D terrain only; scenery, splines, and ground textures are named as not rendered.
+
+Not in this mode, and not approved: OMSI ground textures, terrain holes, water, light
+maps, scenery or spline geometry, asset loading, advanced lighting, shadows, terrain
+streaming, and LOD.
 
 ## OMSI tile and world data layer
 
@@ -368,12 +433,17 @@ Nymeria.OMSI.slnx
 ## Known limitations
 
 - One window per process, main thread only; no engine loop or input layer.
-- Nothing is drawn beyond a clear color. There is no renderer, scene, camera use,
-  texture, model, or shader in this milestone.
+- The bootstrap path draws nothing beyond a clear color. The diagnostic plan and the
+  3D terrain view draw respectively a CPU rasterized plan texture and a terrain mesh;
+  neither loads an OMSI asset.
 - No audio device is created. `Nymeria.Audio` is not referenced.
-- Map support is metadata only. Tile contents, terrain, objects, splines,
-  textures, vehicles, scripts, timetables, and Chrono overlays are not read, so no
-  map is rendered or simulated. Grundorf compatibility is unverified.
+- Map support is read-only parsing plus terrain. Object and spline records are parsed
+  but not turned into geometry, ground textures and light maps are not read, and no
+  asset reference is resolved. Nothing is simulated. Grundorf compatibility is
+  unverified.
+- Terrain is terrain only. Scenery, splines, roads, water, terrain holes, and OMSI's
+  lighting are absent from the 3D view, and the terrain grid's row orientation is an
+  assumption until the owner compares it with the real map.
 - Only `[name]`, `[friendlyname]`, and `[worldcoordinates]` are interpreted from
   `global.cfg`; the tile inventory comes from file names, not from `[map]`.
 - The documented primary encoding is UTF-16LE with a byte-order mark. Files in
@@ -400,14 +470,15 @@ implementation. They are recorded only to keep Task 01 from pre-building them:
 
 ## Verification status
 
-- Engine consumption, host code, the map metadata layer, and docs were reviewed on
-  macOS; restore, build, and 69 headless tests pass locally on macOS arm64.
-- The map tests use synthetic strings written by the tests. They verify parser
-  behavior, not OMSI compatibility.
+- Engine consumption, host code, the map metadata layer, the world layer, the
+  terrain layer, and docs were reviewed on macOS; restore, build, and 193 headless
+  tests pass locally on macOS arm64.
+- The map and terrain tests use synthetic strings and byte arrays written by the
+  tests. They verify parser, decoder, and geometry behavior, not OMSI compatibility.
 - CI jobs for macOS and Windows are defined but have not run for this commit, so
   no CI result is claimed.
 - Windows execution of the host, Direct3D 12 device creation, frame presentation,
-  and shutdown are `NOT RUN (owner validation pending)`. The checklist is in
-  [DEVELOPMENT.md](DEVELOPMENT.md#windows-manual-smoke-test).
+  the terrain DXIL shaders, and shutdown are `NOT RUN (owner validation pending)`.
+  The checklist is in [DEVELOPMENT.md](DEVELOPMENT.md#windows-manual-smoke-test).
 - Scanning a real Grundorf folder is `NOT RUN (owner validation pending)`; the
   procedure is in [OMSI_MAP_PARSING.md](OMSI_MAP_PARSING.md#on-windows-owner).

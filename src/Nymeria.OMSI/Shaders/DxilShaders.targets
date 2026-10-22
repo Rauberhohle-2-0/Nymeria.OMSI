@@ -1,0 +1,152 @@
+<Project>
+
+  <!--
+    DXIL shader build for SDL3's Direct3D 12 backend.
+
+    SDL's Direct3D 12 backend consumes DXIL bytecode, so the terrain HLSL source in
+    this folder is compiled before the assembly manifest is built and the result is
+    embedded as a normal resource. This is a repository-owned shader build step, not
+    an engine or example asset: the HLSL and the Metal source are this repository's
+    own, and nothing is imported from external/Nymeria/examples.
+
+    Nothing here runs on macOS. DXIL generation is gated on a Windows build, so the
+    Metal path keeps its "no shader compiler" property and never downloads anything.
+
+    The compiler is Microsoft's DirectX Shader Compiler. Resolution order:
+
+      1. `DxcPath`, when set, always wins. It is validated, never provisioned.
+      2. A previously provisioned copy of the pinned version in the per-user cache.
+      3. A `dxc` already on PATH, so an offline machine with a compiler is not
+         blocked.
+      4. The pinned release archive, downloaded over HTTPS and checked against the
+         pinned SHA-256 before it is extracted or executed.
+
+    The cache lives outside the repository (LOCALAPPDATA by default) and needs no
+    administrator rights. Compiled bytecode goes under the intermediate output
+    directory and is never committed.
+  -->
+
+  <PropertyGroup>
+    <OmsiDxilEnabled Condition="'$(OmsiDxilEnabled)' == '' and '$(OS)' == 'Windows_NT' and '$(DesignTimeBuild)' != 'true'">true</OmsiDxilEnabled>
+    <OmsiDxilEnabled Condition="'$(OmsiDxilEnabled)' == ''">false</OmsiDxilEnabled>
+
+    <OmsiDxilOutputDirectory Condition="'$(OmsiDxilOutputDirectory)' == ''">$([System.IO.Path]::Combine('$(BaseIntermediateOutputPath)', 'dxil'))</OmsiDxilOutputDirectory>
+
+    <OmsiDxcVersion>1.9.2609</OmsiDxcVersion>
+    <OmsiDxcArchiveName>dxc_2026_09_29.zip</OmsiDxcArchiveName>
+    <OmsiDxcArchiveSha256>ad31b1fc8443175d204f77a611fdb3ef2ec42759bdc2f1167368de24a4a7e7f1</OmsiDxcArchiveSha256>
+    <OmsiDxcDownloadUrl>https://github.com/microsoft/DirectXShaderCompiler/releases/download/v$(OmsiDxcVersion)/$(OmsiDxcArchiveName)</OmsiDxcDownloadUrl>
+
+    <OmsiDxcRoot Condition="'$(OmsiDxcRoot)' == '' and '$(LOCALAPPDATA)' != ''">$(LOCALAPPDATA)\Nymeria.OMSI\dxc</OmsiDxcRoot>
+    <OmsiDxcRoot Condition="'$(OmsiDxcRoot)' == ''">$(UserProfile)\.nymeria-omsi\dxc</OmsiDxcRoot>
+    <OmsiDxcVersionRoot>$(OmsiDxcRoot)\$(OmsiDxcVersion)</OmsiDxcVersionRoot>
+
+    <OmsiDxcArch Condition="'$(PROCESSOR_ARCHITECTURE)' == 'ARM64'">arm64</OmsiDxcArch>
+    <OmsiDxcArch Condition="'$(PROCESSOR_ARCHITECTURE)' == 'x86'">x86</OmsiDxcArch>
+    <OmsiDxcArch Condition="'$(OmsiDxcArch)' == ''">x64</OmsiDxcArch>
+  </PropertyGroup>
+
+  <!--
+    Compiles every OmsiHlslShader item to DXIL. Each item supplies the stage profile,
+    the entry point, the output file name, and the HLSL file:
+
+      <OmsiHlslShader Include="Shaders/Terrain.hlsl"
+                      Profile="vs_6_0"
+                      EntryPoint="VSMain"
+                      OutputName="Terrain.vert.dxil" />
+  -->
+  <Target Name="CompileOmsiDxilShaders"
+          BeforeTargets="PrepareResourceNames"
+          Condition="'$(OmsiDxilEnabled)' == 'true'"
+          Inputs="@(OmsiHlslShader)"
+          Outputs="@(OmsiHlslShader->'$(OmsiDxilOutputDirectory)\%(OutputName)')">
+
+    <!-- 1. An explicit compiler path is validated, not provisioned. -->
+    <Error Condition="'$(DxcPath)' != '' and !Exists('$(DxcPath)')"
+           Text="DxcPath is set to '$(DxcPath)', but no file exists there. Point it at dxc.exe from the DirectX Shader Compiler, or clear it to let the build provision the pinned release." />
+
+    <PropertyGroup>
+      <OmsiDxcExecutable Condition="'$(DxcPath)' != ''">$(DxcPath)</OmsiDxcExecutable>
+      <OmsiDxcSource Condition="'$(DxcPath)' != ''">DxcPath</OmsiDxcSource>
+      <OmsiDxcCachedExecutable>$(OmsiDxcVersionRoot)\bin\$(OmsiDxcArch)\dxc.exe</OmsiDxcCachedExecutable>
+      <OmsiDxcExecutable Condition="'$(OmsiDxcExecutable)' == '' and Exists('$(OmsiDxcCachedExecutable)')">$(OmsiDxcCachedExecutable)</OmsiDxcExecutable>
+      <OmsiDxcSource Condition="'$(OmsiDxcExecutable)' != '' and '$(OmsiDxcSource)' == ''">cache</OmsiDxcSource>
+    </PropertyGroup>
+
+    <!-- 2. Fall back to a compiler already on PATH. -->
+    <Exec Condition="'$(OmsiDxcExecutable)' == ''"
+          Command="where.exe dxc"
+          IgnoreExitCode="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="_OmsiDxcPathProbeExitCode" />
+    </Exec>
+
+    <PropertyGroup>
+      <OmsiDxcExecutable Condition="'$(OmsiDxcExecutable)' == '' and '$(_OmsiDxcPathProbeExitCode)' == '0'">dxc</OmsiDxcExecutable>
+      <OmsiDxcSource Condition="'$(OmsiDxcExecutable)' != '' and '$(OmsiDxcSource)' == ''">PATH</OmsiDxcSource>
+      <_OmsiDxcPending Condition="'$(OmsiDxcExecutable)' == ''">true</_OmsiDxcPending>
+      <_OmsiDxcArchivePath Condition="'$(_OmsiDxcPending)' == 'true'">$(OmsiDxcRoot)\downloads\$(OmsiDxcArchiveName)</_OmsiDxcArchivePath>
+    </PropertyGroup>
+
+    <!-- 3. Provision the pinned release: download, verify, then extract. -->
+    <Message Condition="'$(_OmsiDxcPending)' == 'true'" Importance="high"
+             Text="Nymeria.OMSI: downloading the DirectX Shader Compiler $(OmsiDxcVersion) into $(OmsiDxcRoot). This happens once per machine." />
+
+    <MakeDir Condition="'$(_OmsiDxcPending)' == 'true'"
+             Directories="$(OmsiDxcRoot)\downloads" />
+
+    <DownloadFile Condition="'$(_OmsiDxcPending)' == 'true' and !Exists('$(_OmsiDxcArchivePath)')"
+                  SourceUrl="$(OmsiDxcDownloadUrl)"
+                  DestinationFolder="$(OmsiDxcRoot)\downloads"
+                  DestinationFileName="$(OmsiDxcArchiveName)"
+                  Retries="2"
+                  RetryDelayMilliseconds="2000"
+                  ContinueOnError="ErrorAndContinue" />
+
+    <Error Condition="'$(_OmsiDxcPending)' == 'true' and !Exists('$(_OmsiDxcArchivePath)')"
+           Text="Nymeria.OMSI could not download the DirectX Shader Compiler $(OmsiDxcVersion) from $(OmsiDxcDownloadUrl), which the terrain DXIL shaders need. On an offline or proxied machine, install DXC and pass -p:DxcPath=&quot;path\to\dxc.exe&quot; or add dxc to PATH. Nothing was executed." />
+
+    <GetFileHash Condition="'$(_OmsiDxcPending)' == 'true' and Exists('$(_OmsiDxcArchivePath)')"
+                 Files="$(_OmsiDxcArchivePath)"
+                 Algorithm="SHA256"
+                 HashEncoding="hex">
+      <Output TaskParameter="Items" ItemName="_OmsiDxcArchiveHashes" />
+    </GetFileHash>
+
+    <PropertyGroup Condition="'$(_OmsiDxcPending)' == 'true' and Exists('$(_OmsiDxcArchivePath)')">
+      <_OmsiDxcArchiveHash>%(_OmsiDxcArchiveHashes.FileHash)</_OmsiDxcArchiveHash>
+      <_OmsiDxcArchiveRejected Condition="'$(_OmsiDxcArchiveHash)' != '$(OmsiDxcArchiveSha256)'">true</_OmsiDxcArchiveRejected>
+    </PropertyGroup>
+
+    <Delete Condition="'$(_OmsiDxcArchiveRejected)' == 'true'"
+            Files="$(_OmsiDxcArchivePath)" />
+
+    <Error Condition="'$(_OmsiDxcArchiveRejected)' == 'true'"
+           Text="Nymeria.OMSI rejected the downloaded DirectX Shader Compiler archive: its SHA-256 is '$(_OmsiDxcArchiveHash)' but the pinned value is '$(OmsiDxcArchiveSha256)'. The archive was deleted without being extracted or executed. Retry the build, or pass -p:DxcPath=&quot;path\to\dxc.exe&quot;." />
+
+    <Unzip Condition="'$(_OmsiDxcPending)' == 'true' and '$(_OmsiDxcArchiveRejected)' != 'true'"
+           SourceFiles="$(_OmsiDxcArchivePath)"
+           DestinationFolder="$(OmsiDxcVersionRoot)"
+           ContinueOnError="ErrorAndContinue" />
+
+    <Error Condition="'$(_OmsiDxcPending)' == 'true' and !Exists('$(OmsiDxcCachedExecutable)')"
+           Text="The DirectX Shader Compiler archive did not contain bin\$(OmsiDxcArch)\dxc.exe under $(OmsiDxcVersionRoot), so the pinned layout changed. Report this rather than working around it, and pass -p:DxcPath=&quot;path\to\dxc.exe&quot; to build now." />
+
+    <Delete Condition="'$(_OmsiDxcPending)' == 'true'" Files="$(_OmsiDxcArchivePath)" />
+
+    <PropertyGroup Condition="'$(_OmsiDxcPending)' == 'true'">
+      <OmsiDxcExecutable>$(OmsiDxcCachedExecutable)</OmsiDxcExecutable>
+      <OmsiDxcSource>download</OmsiDxcSource>
+    </PropertyGroup>
+
+    <Message Condition="'$(OmsiDxcExecutable)' != ''" Importance="high"
+             Text="Nymeria.OMSI: compiling DXIL terrain shaders with '$(OmsiDxcExecutable)' (from $(OmsiDxcSource), pinned compiler $(OmsiDxcVersion))." />
+
+    <MakeDir Directories="$(OmsiDxilOutputDirectory)" />
+
+    <Exec Command="&quot;$(OmsiDxcExecutable)&quot; -T %(OmsiHlslShader.Profile) -E %(OmsiHlslShader.EntryPoint) -Fo &quot;$(OmsiDxilOutputDirectory)\%(OmsiHlslShader.OutputName)&quot; &quot;%(OmsiHlslShader.FullPath)&quot;" />
+
+  </Target>
+
+</Project>

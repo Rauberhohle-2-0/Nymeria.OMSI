@@ -262,12 +262,84 @@ public sealed class HostOptionsTests
     }
 
     [Fact]
+    public void Terrain3DIsOffByDefaultAndRequiresAMap()
+    {
+        Assert.True(HostOptions.TryParse(
+            Array.Empty<string>(),
+            out HostOptions plain,
+            out _));
+        Assert.False(plain.Terrain3D);
+
+        Assert.False(HostOptions.TryParse(
+            new[] { "--terrain-3d" },
+            out _,
+            out string? error));
+        Assert.NotNull(error);
+        Assert.Contains("--terrain-3d requires --map", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Terrain3DIsAcceptedWithAMap()
+    {
+        bool parsed = HostOptions.TryParse(
+            new[] { "--map", "maps/TestMap", "--terrain-3d" },
+            out HostOptions options,
+            out string? error);
+
+        Assert.True(parsed);
+        Assert.Null(error);
+        Assert.True(options.Terrain3D);
+        Assert.False(options.RenderMap);
+        Assert.Equal("maps/TestMap", options.MapDirectory);
+        Assert.Null(options.MaximumFrames);
+    }
+
+    [Fact]
+    public void Terrain3DCannotBeCombinedWithRenderOrWorld()
+    {
+        Assert.False(HostOptions.TryParse(
+            new[] { "--map", "maps/TestMap", "--render", "--terrain-3d" },
+            out _,
+            out string? renderError));
+        Assert.Contains("cannot be combined", renderError, StringComparison.Ordinal);
+
+        Assert.False(HostOptions.TryParse(
+            new[] { "--world", "maps/TestMap", "--terrain-3d" },
+            out _,
+            out string? worldError));
+        Assert.Contains("cannot be combined", worldError, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SmokeCanBudgetATerrainRun()
+    {
+        bool parsed = HostOptions.TryParse(
+            new[] { "--map", "maps/TestMap", "--terrain-3d", "--smoke" },
+            out HostOptions options,
+            out string? error);
+
+        Assert.True(parsed);
+        Assert.Null(error);
+        Assert.True(options.Terrain3D);
+        Assert.Equal(HostOptions.SmokeFrameCount, options.MaximumFrames);
+    }
+
+    [Fact]
     public void UsageTextDocumentsEverySupportedArgument()
     {
         Assert.Contains("--smoke", HostOptions.UsageText, StringComparison.Ordinal);
         Assert.Contains("--map", HostOptions.UsageText, StringComparison.Ordinal);
         Assert.Contains("--render", HostOptions.UsageText, StringComparison.Ordinal);
+        Assert.Contains("--terrain-3d", HostOptions.UsageText, StringComparison.Ordinal);
         Assert.Contains("--world", HostOptions.UsageText, StringComparison.Ordinal);
         Assert.Contains("--help", HostOptions.UsageText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UsageTextDocumentsTheTerrainCameraControls()
+    {
+        Assert.Contains("W/A/S/D", HostOptions.UsageText, StringComparison.Ordinal);
+        Assert.Contains("right mouse button", HostOptions.UsageText, StringComparison.Ordinal);
+        Assert.Contains("R resets the view", HostOptions.UsageText, StringComparison.Ordinal);
     }
 }

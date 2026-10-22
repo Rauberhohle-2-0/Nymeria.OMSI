@@ -154,8 +154,11 @@ is.
 - The documented layout is a 4-byte value followed by 61 x 61 32-bit floats, so
   14,888 bytes. A different length is a warning that names the actual and expected
   sizes.
-- Heights are **not** decoded, no mesh is built, and nothing is written. The sidecar
-  is metadata for the next task, not geometry for this one.
+- This layer only probes existence and size. The heights themselves are decoded by the
+  Task 05 terrain layer, which validates the header, byte order, finite values, and
+  plausible magnitudes before building geometry; see
+  [docs/OMSI_TERRAIN_3D.md](OMSI_TERRAIN_3D.md). Nothing in this layer builds a mesh
+  or writes a file.
 
 ## World model
 
