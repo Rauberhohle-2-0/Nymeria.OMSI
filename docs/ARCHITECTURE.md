@@ -101,12 +101,13 @@ repository and its own solution.
 ### Engine upgrade procedure
 
 Changing the submodule pointer **is** an engine upgrade and requires its own
-reviewed pull request:
+reviewed commit:
 
 1. In Nymeria, land and tag/record the engine commit that is wanted.
 2. `git -C external/Nymeria fetch origin`
 3. `git -C external/Nymeria checkout <commit>`
-4. Update the pinned commit in this document and in the pull request description.
+4. Update the pinned commit in this document and state the old and new commit
+   hashes in the commit message.
 5. Build, run the headless tests, and ask the owner for Windows validation of the
    affected runtime behavior.
 6. Commit the submodule pointer change on its own, with the old and new commit

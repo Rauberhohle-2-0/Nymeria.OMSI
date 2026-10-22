@@ -90,7 +90,7 @@ git status                       # the gitlink change must be reviewed
 
 Then update the pinned commit in
 [ARCHITECTURE.md](ARCHITECTURE.md#decision), rebuild, run the headless tests, and
-open a separate pull request for the pointer change. See
+commit the pointer change on its own with the old and new commit hashes. See
 [GIT_GUIDELINES.md](../GIT_GUIDELINES.md).
 
 ## Build, static checks, and tests on macOS
@@ -330,7 +330,7 @@ its configuration metadata.
 
 ### If something fails
 
-Report, in the pull request or issue:
+Report, in the task report or issue:
 
 - Exact command, exit code (`echo %ERRORLEVEL%` in `cmd`, `$LASTEXITCODE` in
   PowerShell), and the complete console output.

@@ -7,11 +7,68 @@ reproducible. See [AGENTS.md](AGENTS.md) for agent-specific conduct and
 
 ## Branches
 
-- Work on the authorized task branch only, for example `task-01-bootstrap`.
-- Never commit directly to `main` unless the maintainer explicitly instructs it.
+`main` is the default development branch and the only branch implementation work is
+performed on. This repository has a single maintainer and a task-driven workflow, so
+a branch plus pull request for every task costs time and adds nothing.
+
+- Perform every implementation task directly on `main`.
+- Before implementing, verify the branch. `git branch --show-current` must print
+  `main`.
+- If the current branch is not `main`, do not create a branch and do not switch
+  branches automatically. Report the branch, what it contains, and any uncommitted
+  changes, then request instructions.
+- Do not create feature, task, or temporary development branches unless the project
+  owner explicitly requests one.
+- Do not open pull requests automatically. Create one only when the owner asks.
 - Do not merge, rebase, delete, or push branches without authorization.
 - Never force-push and never rewrite published history. Correct a faulty published
   change with a new revert or fix commit.
+
+Unmerged implementation work on another branch is reported before any further work.
+It is never merged, deleted, or rewritten on the agent's own initiative.
+
+## Default workflow
+
+Start from a current `main`:
+
+```bash
+git status
+git branch --show-current
+git pull --ff-only origin main
+```
+
+`--ff-only` is deliberate: it cannot create a merge commit, and it cannot rebase or
+otherwise alter local work. If it refuses, local `main` and `origin/main` have
+diverged; stop and report that instead of merging, resetting, or force-pushing.
+
+Implement the requested change, then run the validation the task allows and report
+the results ([AGENTS.md](AGENTS.md) section 7,
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)).
+
+```bash
+git add <explicitly selected files>
+git commit -m "feat: describe the implemented change"
+git push origin main
+```
+
+- Staging is explicit: name every path, never `git add -A`.
+- The commit message must describe the change that was actually made. A subject that
+  does not match the diff is a defect, not a wording preference.
+- `git add` and `git commit` belong to the task. `git push origin main` needs
+  explicit authorization from the project owner or from the current task; commit
+  locally and stop when that authorization is missing.
+
+## Prohibited behavior
+
+- Automatic feature branches, task branches, or temporary development branches.
+- Automatic pull requests.
+- Unnecessary branch switching.
+- Force pushes.
+- Rewriting history.
+- `Co-authored-by` trailers identifying AI assistants, and any other AI attribution
+  in commit messages.
+- Committing generated binaries, local OMSI assets, or build artifacts.
+- Modifying the Nymeria engine submodule unless explicitly requested.
 
 ## Commits
 
@@ -85,36 +142,46 @@ commit author line or pull request description, not through a trailer.
 - Do not modify files under `external/Nymeria/`. If the engine is wrong, open a
   change in the Nymeria repository.
 
-## Pull requests and review
+## Review of direct commits
 
-- Every change lands through a pull request with passing checks and review.
+Changes land on `main` as reviewed commits, not through a pull request per task.
+
+- Review your own change before committing: `git status`, `git diff`, and
+  `git diff --staged`. A direct commit does not remove the review step; it moves the
+  review to before the commit instead of after it.
 - The commit-policy and platform build jobs in
-  [.github/workflows/ci.yml](.github/workflows/ci.yml) are required checks.
-- Fill in the pull request template: scope, platform validation results, dependency
-  changes, and Windows validation status.
-- Do not merge your own pull request without the maintainer's decision.
+  [.github/workflows/ci.yml](.github/workflows/ci.yml) still run on every push to
+  `main` and on pull requests targeting `main`, so a pushed commit stays verifiable.
+- A pull request is optional and is created only when the owner asks for one. When
+  one exists, fill in the pull request template: scope, platform validation results,
+  dependency changes, and Windows validation status.
+- Merge commits are not part of the workflow. Existing merge commits in history are
+  left as they are.
 
 ### Repository settings that committed files cannot enforce
 
 GitHub branch protection or rulesets are repository settings, not files. They are
-not enabled by this repository and cannot be enabled by a commit. To enforce them,
-the maintainer must, in GitHub, protect `main` and require:
+not enabled by this repository and cannot be enabled by a commit. If the maintainer
+configures them, the `main` ruleset must stay compatible with direct commits:
 
-- a pull request before merging,
-- the `Build (macos-latest)`, `Build (windows-latest)`, and `Commit policy` checks,
-- an approving review,
-- no force pushes and no branch deletion.
+- require the `Build (macos-latest)`, `Build (windows-latest)`, and `Commit policy`
+  checks,
+- block force pushes and branch deletion.
 
-Until that is configured, this document describes the required process and CI
-enforces what it can, but GitHub does not block direct pushes to `main`.
+A mandatory pull request and a mandatory approving review are deliberately **not**
+part of that configuration: either would block the direct-to-`main` workflow, making
+this document impossible to follow. Until a ruleset exists, GitHub does not block
+direct pushes, and this document describes the required process while CI enforces
+what it can.
 
 ## Discrepancies with the engine repository
 
-Nymeria has its own `docs/GIT_GUIDELINES.md`, `AGENTS.md`, and CI policy. Two
-differences are flagged here rather than silently resolved:
+Nymeria has its own `docs/GIT_GUIDELINES.md`, `AGENTS.md`, and CI policy. Two points
+are recorded here rather than silently resolved:
 
-1. Nymeria's workflow pushes verified commits directly to `main` and its branches.
-   This repository requires a task branch and pull request review instead.
+1. Both repositories push verified commits directly to `main`. Nymeria additionally
+   uses development branches for larger efforts; this repository does not, unless
+   the owner explicitly requests one.
 2. Nymeria allows Dependabot auto-merge gated on its `Repository checks` workflow.
    This repository intentionally has no dependency bot; engine and package updates
    are deliberate and reviewed.

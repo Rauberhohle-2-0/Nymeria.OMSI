@@ -55,7 +55,7 @@ is **not** a fork, a second rendering engine, or a parallel platform layer.
   reason. Match versions the engine already uses where a package is genuinely
   needed.
 - Do not upgrade the engine pointer automatically or as a side effect of another
-  change. A pointer change is an engine upgrade: separate pull request, old and new
+  change. A pointer change is an engine upgrade: its own commit, old and new
   commit hashes recorded, rebuilt, reviewed, and Windows validation assessed.
 - No Dependabot or automated dependency bot is configured; do not add one without
   approval.
@@ -111,15 +111,33 @@ was green. Compilation is not runtime validation. Windows runtime behavior remai
 
 Follow [GIT_GUIDELINES.md](GIT_GUIDELINES.md).
 
-- Work only on the authorized task branch.
-- Do not commit directly to `main` unless explicitly instructed.
-- Do not rewrite history, force-push, merge, delete branches, or change repository
-  settings without explicit authorization.
+`main` is the only implementation branch. This repository has one maintainer and a
+task-driven workflow, so a branch per task is overhead rather than safety. The
+workflow is direct: implement on `main`, commit on `main`, push only when
+authorized.
+
+- Perform every implementation task directly on `main`.
+- Before implementing, verify the branch with `git branch --show-current`. It must
+  print `main`.
+- If the current branch is not `main`, do not create a branch and do not switch
+  branches. Stop, report which branch is checked out and what it contains, and
+  request instructions.
+- Do not create feature, task, or temporary development branches unless the project
+  owner explicitly requests one.
+- Do not open pull requests automatically. A pull request is created only when the
+  owner asks for one.
+- Commit completed changes directly to `main`.
+- Push completed, validated commits to `origin/main` only when the owner or the
+  current task explicitly authorizes it. A local commit is not a push.
+- Never force-push and never rewrite published history. Correct a faulty published
+  change with a new revert or fix commit.
+- Do not merge, rebase, delete branches, or change repository settings without
+  explicit authorization.
 - Stage explicit paths; never `git add -A`.
 - Do not commit build output, caches, generated shader bytecode, downloaded
   toolchains, credentials, or machine-specific paths.
-- Run `scripts/check-commit-trailers.sh <range>` before proposing a change when
-  commit messages are part of the work.
+- Run `scripts/check-commit-trailers.sh <range>` before pushing when commit messages
+  are part of the work.
 
 ## 9. Authorship
 
@@ -150,6 +168,7 @@ Follow [GIT_GUIDELINES.md](GIT_GUIDELINES.md).
 Finish with a report that contains:
 
 - What changed, file by file.
+- The current branch, and whether the work was committed and/or pushed.
 - The exact commands executed, with platform and result (`PASS`/`FAIL`/etc.).
 - Known gaps and unverified behavior, explicitly including Windows runtime checks.
 - Scope confirmation: what was deliberately not implemented.
