@@ -55,3 +55,16 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+.freebuff/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vs/
+.idea/
+.vscode/
+
+# Generated shader bytecode. Task 01 has no shaders; a later task that adds a
+# shader build step must generate into bin/obj and never commit the output.
+*.dxil

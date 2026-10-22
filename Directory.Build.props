@@ -1,0 +1,20 @@
+<Project>
+
+  <!--
+    Compiler defaults for Nymeria.OMSI projects only. The Nymeria submodule keeps
+    its own Directory.Build.props, and MSBuild imports only the nearest one for a
+    given project, so the engine stays built with its own settings.
+  -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+    <!-- Restore fails on a known vulnerability in a direct or transitive package,
+         because warnings are errors here. -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+  </PropertyGroup>
+
+</Project>
