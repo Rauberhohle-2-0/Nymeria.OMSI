@@ -114,7 +114,7 @@ Notes:
 - Builds are warning-free by policy: `TreatWarningsAsErrors` is enabled in
   [Directory.Build.props](../Directory.Build.props) for this repository's
   projects, and the engine keeps its own settings.
-- The test project runs 283 headless tests. They cover command-line parsing, the
+- The test project runs 284 headless tests. They cover command-line parsing, the
   GPU-free map metadata layer (text encoding selection and fallbacks, keyword-block
   tokenizing, tile file-name parsing, discovery ordering, duplicates, unsupported
   directives, summary output), the GPU-free tile/world layer (record layouts by
@@ -135,8 +135,9 @@ Notes:
   order, `.dds` texture preference, the `[model]`/`[mesh]`/`[matl]`/`[absheight]`
   subset, switch-off markers and comment lines, unsupported-keyword counting, placement
   transforms and their sign conventions, bilinear terrain height sampling, and loading
-  with positive and negative caching, deduplicated diagnostics, counted skips, and a
-  synthetic `.x` mesh and bitmap fixture).
+  with positive and negative caching, deduplicated diagnostics, counted skips, a
+  synthetic `.x` mesh and bitmap fixture, and a documented scrambled `.o3d` fixture
+  that the loader must count as decoded).
   They create no window, no GPU device, and no audio device, and they use only
   synthetic strings and byte arrays written by the tests.
 - The pinned engine's own suite covers O3D scrambling: an independent writer-direction

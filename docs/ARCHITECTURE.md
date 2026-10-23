@@ -551,7 +551,7 @@ implementation. They are recorded only to keep Task 01 from pre-building them:
 
 - Engine consumption, host code, the map metadata layer, the world layer, the
   terrain layer, the scenery layer, and docs were reviewed on macOS; restore, build,
-  and 283 headless tests pass locally on macOS arm64, and the pinned engine's own
+  and 284 headless tests pass locally on macOS arm64, and the pinned engine's own
   suite passes (1,133 tests, 2 skipped).
 - The map, terrain, and scenery tests use synthetic strings and byte arrays written
   by the tests. They verify parser, decoder, and geometry behavior, not OMSI

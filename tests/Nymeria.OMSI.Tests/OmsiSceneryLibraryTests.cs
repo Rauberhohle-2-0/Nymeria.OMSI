@@ -12,9 +12,10 @@ namespace Nymeria.OMSI.Tests;
 /// </summary>
 /// <remarks>
 /// The whole installation layout here is synthetic: a map folder, a Sceneryobjects
-/// folder, a tiny text <c>.x</c> mesh, and a generated bitmap. It proves the loader's
-/// resolution, caching, and counting rules. It is not OMSI content and says nothing
-/// about whether a real Grundorf object renders.
+/// folder, a tiny text <c>.x</c> mesh, a documented scrambled <c>.o3d</c> fixture, and
+/// a generated bitmap. It proves the loader's resolution, caching, decoding, and
+/// counting rules. It is not OMSI content and says nothing about whether a real
+/// Grundorf object renders.
 /// </remarks>
 public sealed class OmsiSceneryLibraryTests
 {
@@ -257,6 +258,77 @@ public sealed class OmsiSceneryLibraryTests
             subset => subset.Material.BaseColorTexture is not null);
 
         Assert.True(scene.Counts.Textures.Decoded > 0);
+    }
+
+    [Fact]
+    public void DecodesAKeyZeroO3dMeshThroughTheEngineParser()
+    {
+        using Installation installation = Installation.Create(
+            objectPlacements: 1,
+            scoContent: "[mesh]\r\nbox.o3d\r\n[matl]\r\nwall.bmp\r\n");
+
+        File.WriteAllBytes(
+            Path.Combine(
+                installation.RootPath,
+                "Sceneryobjects",
+                "Test",
+                "model",
+                "box.o3d"),
+            ScrambledO3dMesh());
+
+        OmsiWorldModel world = OmsiWorldLoader.Load(installation.MapDirectory);
+        OmsiTerrainSet terrain = OmsiTerrainSet.Load(world);
+        OmsiSceneryLibrary scene = OmsiSceneryLibrary.Load(
+            world,
+            TerrainHeightSampler.Create(terrain),
+            installation.RootPath);
+
+        // The file is a version 4 mesh with key 0x00000000, the ordinary stock value.
+        // Its scrambled records decode to the documented plain vertices, so the loader
+        // must count a decoded mesh rather than a skipped unsupported format.
+        Assert.Single(scene.Instances);
+        Assert.Equal(1, scene.Counts.Meshes.Decoded);
+        Assert.Equal(0, scene.Counts.Meshes.Failures.Total);
+        Assert.Equal(3, scene.Counts.Vertices);
+    }
+
+    /// <summary>
+    /// Builds a version 4 O3D file with key <c>0</c> whose vertex records are the
+    /// documented three-vertex scrambled fixture. It decodes to the plain vertices
+    /// <c>(1.25, -2.5, 3.75)</c>, <c>(10.3, 4.7, -0.9)</c>, and
+    /// <c>(-7.11, 0.33, 2.2)</c>.
+    /// </summary>
+    private static byte[] ScrambledO3dMesh()
+    {
+        byte[] stored =
+        [
+            0x00, 0x00, 0x20, 0xC0, 0x00, 0x00, 0xA0, 0x3F,
+            0x00, 0x00, 0x70, 0x40, 0x00, 0x00, 0x00, 0x80,
+            0xCD, 0xCC, 0x4C, 0xBF, 0x9A, 0x99, 0x19, 0xBF,
+            0xCD, 0xCC, 0xCC, 0x3D, 0x66, 0x66, 0x66, 0x3F,
+            0x66, 0x66, 0x96, 0x40, 0xCD, 0xCC, 0x24, 0x41,
+            0x66, 0x66, 0x66, 0xBF, 0x00, 0x00, 0x80, 0xBF,
+            0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x80,
+            0x00, 0x00, 0x00, 0x3F, 0xEE, 0x5A, 0xC2, 0x3E,
+            0xC3, 0xF5, 0xA8, 0x3E, 0x1F, 0x85, 0xE3, 0xC0,
+            0xCD, 0xCC, 0x0C, 0x40, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x40, 0x3F, 0x1A, 0xC0, 0x1B, 0x3F,
+        ];
+
+        var bytes = new List<byte>(128);
+
+        bytes.AddRange(new byte[] { 0x84, 0x19, 0x04, 0x00 });
+        bytes.AddRange(BitConverter.GetBytes(0u));
+        bytes.Add(0x17);
+        bytes.AddRange(BitConverter.GetBytes(3u));
+        bytes.AddRange(stored);
+        bytes.Add(0x49);
+        bytes.AddRange(BitConverter.GetBytes(1u));
+        bytes.AddRange(new byte[] { 0x00, 0x00, 0x01, 0x00, 0x02, 0x00 });
+        bytes.AddRange(new byte[] { 0x00, 0x00 });
+
+        return [.. bytes];
     }
 
     [Fact]
