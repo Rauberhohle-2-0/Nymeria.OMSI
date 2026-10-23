@@ -75,9 +75,14 @@ with MSBuild project references to the two engine projects the host needs:
 <ProjectReference Include="../../external/Nymeria/src/graphics/Nymeria.Graphics/Nymeria.Graphics.csproj" />
 ```
 
-The pinned commit `6e727248627692a663b0651f09be2c662ed14681` is recorded by the
+The pinned commit `e9baf833909323ed95ee614f766a3ed86c150249` is recorded by the
 superproject gitlink, i.e. in the committed tree entry for `external/Nymeria`, not
 by a branch name. A moving branch is never a build input.
+
+The pin has moved once since Task 01, as its own reviewed upgrade: from
+`6e727248627692a663b0651f09be2c662ed14681` to the commit above, which adds the
+scrambled O3D vertex decoding described under [Scenery scene mode](#scenery-scene-mode).
+No other engine source changed.
 
 Why this and not the alternatives:
 
@@ -385,8 +390,11 @@ Rules that keep the boundary intact:
   headlessly, and a map with broken assets fails with diagnostics instead of a GPU
   failure.
 - **The engine decodes the formats.** `.o3d`, `.x`, and every texture go through the
-  engine's own parsers and texture loader. This repository adds a resolution policy and
-  a cache, not a decoder, and it changes no engine file.
+  engine's own parsers and texture loader, including the version 4+ O3D vertex
+  scrambling that stock content uses. This repository adds a resolution policy and a
+  cache, not a decoder. The scrambling support is an engine change, made in the engine
+  repository as its own commit and consumed here as a reviewed pointer bump; no engine
+  file is edited from this repository.
 - **Untrusted content is bounded.** References are resolved only against explicit
   documented asset folders, and rejected rather than repaired if they are absolute,
   drive-qualified, empty-component, or control-character paths, or if a legitimate
@@ -511,6 +519,10 @@ Nymeria.OMSI.slnx
   convention are assumptions until the owner compares them with the real map.
 - Scenery is a bounded prefix of placements (2,000) with no frustum or distance
   culling; alpha-blended materials are drawn with a single 0.5 alpha test.
+- Scrambled O3D vertex records now decode, but a key that does not match the data
+  cannot be detected numerically: the engine's fail-safe rejects only damaged
+  records. Correct geometry on real content is `NOT RUN (owner validation pending)`
+  and is a visual check, not a build result.
 - Only `[name]`, `[friendlyname]`, and `[worldcoordinates]` are interpreted from
   `global.cfg`; the tile inventory comes from file names, not from `[map]`.
 - The documented primary encoding is UTF-16LE with a byte-order mark. Files in
@@ -538,10 +550,13 @@ implementation. They are recorded only to keep Task 01 from pre-building them:
 ## Verification status
 
 - Engine consumption, host code, the map metadata layer, the world layer, the
-  terrain layer, and docs were reviewed on macOS; restore, build, and 193 headless
-  tests pass locally on macOS arm64.
-- The map and terrain tests use synthetic strings and byte arrays written by the
-  tests. They verify parser, decoder, and geometry behavior, not OMSI compatibility.
+  terrain layer, the scenery layer, and docs were reviewed on macOS; restore, build,
+  and 283 headless tests pass locally on macOS arm64, and the pinned engine's own
+  suite passes (1,133 tests, 2 skipped).
+- The map, terrain, and scenery tests use synthetic strings and byte arrays written
+  by the tests. They verify parser, decoder, and geometry behavior, not OMSI
+  compatibility; the O3D scrambling tests live in the engine's suite, which this
+  repository's CI does not run.
 - CI jobs for macOS and Windows are defined but have not run for this commit, so
   no CI result is claimed.
 - Windows execution of the host, Direct3D 12 device creation, frame presentation,

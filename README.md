@@ -263,11 +263,12 @@ the owner's Windows run is what closes it.
 ## Engine dependency
 
 Nymeria publishes no NuGet packages, so the engine is consumed as a Git submodule
-pinned to commit `6e727248627692a663b0651f09be2c662ed14681` (the `main` tip at the
-time of Task 01), referenced by MSBuild project references to `Nymeria.Platform` and
-`Nymeria.Graphics`. The engine stays independently buildable and is read-only from
-here. The decision, the alternatives that were rejected, and the upgrade procedure
-are recorded in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+pinned to commit `e9baf833909323ed95ee614f766a3ed86c150249`, referenced by MSBuild
+project references to `Nymeria.Platform` and `Nymeria.Graphics`. The engine stays
+independently buildable and is read-only from here. The pin has moved once since
+Task 01, for the engine's scrambled O3D vertex decoding. The decision, the
+alternatives that were rejected, and the upgrade procedure are recorded in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Documentation
 
