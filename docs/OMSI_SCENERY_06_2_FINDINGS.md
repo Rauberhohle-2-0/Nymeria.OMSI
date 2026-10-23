@@ -1,10 +1,12 @@
 # Task 06.2 discovery findings — O3D scrambling, texture mapping, diagnostic truth
 
-Status: **discovery only**. No code in this repository was changed, and
-`external/Nymeria/` was not modified or proposed for modification by this task yet.
-**Stop condition 1 has triggered** (see [Stop-condition events](#stop-condition-events)):
-the O3D scrambling fix cannot be made inside this repository's boundaries, so the
-implementation phase has not started.
+Status: discovery complete, and the implementation that stays inside this repository's
+boundaries has landed after the owner's decision: diagnostic classification,
+deduplication with occurrence counters, per-class counts, the honest verdict, the printed
+asset roots, the three-outcome material resolution, and the cache stamp. **Scrambled O3D
+decoding was not implemented**: stop condition 1 triggered (see [Stop-condition
+events](#stop-condition-events)), because the fix requires a change in
+`external/Nymeria/`, which this task did not make. `external/Nymeria/` is unmodified.
 
 This note is the mandated discovery deliverable for Task 06.2 and must be committed
 before any code change. It is deliberately blunt about which claims are established
@@ -302,17 +304,18 @@ Two independent blockers:
 
 1. **Environment.** The census needs the owner's `Sceneryobjects` tree; there is no
    OMSI installation on macOS and no asset may be committed or synthesized.
-2. **A reporting defect in the current build.** The summary prints
+2. **A reporting defect in the build that produced Appendix A.** The summary printed
    `unsupported definition keywords: 974 occurrence(s) counted; the first few are named
-   below` — but **nothing is named below**. `SceneryDefinition.UnsupportedKeywords` (the
-   first eight distinct spellings the parser collects) is stored and never read by
+   below` — but **nothing was named below**. `SceneryDefinition.UnsupportedKeywords` (the
+   first eight distinct spellings the parser collected) was stored and never read by
    `ScenerySummaryWriter` or by anything else (verified by search across
-   `src/Nymeria.OMSI/`). Appendix A bears this out: no keyword names appear. The
-   sentence is false, and the run that produced Appendix A could not have shown the
-   names even if the owner had looked for them.
+   `src/Nymeria.OMSI/`). Appendix A bears this out: no keyword names appear, so the
+   sentence was false and that run could not have shown the names even if the owner had
+   looked for them. The implementation phase replaced the single total with a per-keyword
+   census that the summary prints with counts, so the next run does produce the list.
 
-That is a reporting bug to fix in the implementation phase, and it is the reason D3's
-"complete list" is currently impossible for anyone, not just for this environment.
+That defect is the reason D3's "complete list" was impossible for anyone, not just for
+this environment.
 
 ### Classification of the documented `.sco` vocabulary
 
@@ -383,9 +386,12 @@ the census is run.
 
 ## D4 — Placement anchor
 
-**Not available.** The owner has not named an object, and this environment cannot
-propose one: there is no Grundorf installation to read, the map's placement list is
-unreadable here, and picking a building from a memory of the map would be an invention.
+**Not available — the owner chose to proceed without an anchor.** This environment
+cannot propose one either: there is no Grundorf installation to read, the map's
+placement list is unreadable here, and picking a building from a memory of the map would
+be an invention. The Windows check therefore verifies that whatever the summary says is
+instanced appears correctly, and that everything absent is named by a diagnostic; it is
+recorded as a limitation, not a failure.
 
 What is needed, in the owner's own words:
 
@@ -435,18 +441,18 @@ invalidation, locking, and versioning requirements.
 
 ## Diagnostic-truth defects found during discovery
 
-These are code-level facts, verifiable without OMSI, and each belongs to the
-implementation phase of Task 06.2:
+These were code-level facts, verifiable without OMSI. Each was fixed in the
+implementation phase of Task 06.2 except where the table says otherwise:
 
-| Defect | Evidence | Intended fix |
+| Defect | Evidence | Fix landed |
 | --- | --- | --- |
 | `skipped: 278 definition(s) without drawable geometry` counts **placements**, not definitions | `DefinitionFailures` is incremented per placement with a cached failed model; 817 + 278 = 1,095 | rename the counter in the summary, or count distinct failed definitions |
 | "the first few are named below" never names anything | `SceneryDefinition.UnsupportedKeywords` has no reader outside the parser | print per-keyword counts |
-| `Mat1`-style material labels are reported as unresolved textures | The resolver's name-as-file fallback cannot distinguish an unmapped label from a missing file | three-outcome material classification (D2) |
+| `Mat1`-style material labels are reported as unresolved textures | The resolver's name-as-file fallback cannot distinguish an unmapped label from a missing file | three-outcome material classification (D2); an unmapped label is now `missing texture mapping`, one line per definition |
 | No diagnostic class, so failure reasons are only distinguishable by reading message text | `SceneryLoadCounts` has one counter per skip site, none per class | classify every skip into the six required classes and count per class |
 | Duplicate suppression is by `(severity, message)` with no occurrence counter | `SceneryDiagnostics.Report` increments `Suppressed` but never attaches a count to a listed line | key by `(canonical path, error class)` and print the occurrence count on the listed line |
-| The top line claims "loaded OMSI scenery objects" whenever instances > 0, regardless of how much was skipped | `ScenerySummaryWriter.Write` | a derived verdict, `scene: incomplete — …` unless nothing was skipped |
-| The permitted asset roots are only echoed inside a failure message, never stated as a list | `ResolveAsset` builds the list only in the not-found error | print the roots once, unconditionally |
+| The top line claims "loaded OMSI scenery objects" whenever instances > 0, regardless of how much was skipped | `ScenerySummaryWriter.Write` | a derived verdict, `scene: incomplete — …`; `scene: complete` is never printed |
+| The permitted asset roots are only echoed inside a failure message, never stated as a list | `ResolveAsset` builds the list only in the not-found error | the roots are now printed in an unconditional `asset roots:` line |
 
 ## Stop-condition events
 
@@ -458,25 +464,32 @@ implementation phase of Task 06.2:
 | 4 | The D4 anchor cannot be reached with the current `.sco` subset even after texture resolution | Cannot be assessed: no anchor named |
 | 5 | A change would touch more than two of {`.sco` parser, asset resolver, O3D decoder, texture pipeline, GPU resource ownership, scene graph} | Not triggered by the plan below. Without scrambling, the plan touches the `.sco` parser (keyword census) and the asset resolver (material mapping) — two. Adding the O3D decoder would make three, which is why scrambling is not attempted here |
 
-Per the task's stopping rule, the note is committed and the owner is asked before any
-implementation proceeds.
+Per the task's stopping rule, the note was committed and the owner was asked before any
+implementation proceeded. The owner's decision was recorded as: **proceed without
+scrambling**, and **no placement anchor** (D4). The implementation described above is the
+result; the engine change D1 recommends remains open.
 
-## What Task 06.2 would touch if it resumes without scrambling
+## What Task 06.2 changed
 
-- `Scenery/SceneryDiagnostics.cs` — classification and `(path, class)` dedup with
-  occurrence counts.
-- `Scenery/OmsiSceneryLibrary.cs` — per-class counters, the three-outcome material
-  resolution, cache stamps, verdict inputs.
-- `Scenery/SceneryDefinitionParser.cs` — per-keyword census in place of a single total.
-- `Scenery/SceneryModel.cs` — the material outcome carried on a subset.
-- `Rendering/ScenerySummaryWriter.cs` — per-class counts, the roots list, the derived
-  verdict.
-- `tests/Nymeria.OMSI.Tests/` — synthetic fixtures for each class, dedup counting,
-  material outcomes, cache stamps.
-- `docs/OMSI_SCENERY_3D.md` — the reporting contract, once it exists.
+- `Scenery/SceneryDiagnostics.cs` — diagnostic classes, `(path, class)` dedup with
+  occurrence counts, the per-class tally, and the decoder-message classifier.
+- `Scenery/SceneryAssetStamp.cs` — the one-run cache validity stamp (D5).
+- `Scenery/OmsiSceneryLibrary.cs` — per-class counts, the three-outcome material
+  resolution, keyword aggregation, cache stamps, verdict inputs.
+- `Scenery/SceneryDefinitionParser.cs` — classified parse diagnostics, the per-keyword
+  census, and the roots description.
+- `Scenery/SceneryDefinition.cs` — keyword counts, mesh failure classes, texture
+  resolution status; the unused duplicate diagnostic list was dropped.
+- `Rendering/ScenerySummaryWriter.cs` — the derived verdict, per-class breakdowns, the
+  roots list, the keyword census, and classed diagnostics with occurrence counters.
+- `Rendering/ScenePresenter.cs` — GPU failures are named as such in the upload line.
+- `Program.cs` — passes the new summary inputs.
+- `tests/Nymeria.OMSI.Tests/` — new tests for dedup and counting, the stamp, the writer
+  contract, and the classifier; existing scenery tests updated for the new counts.
+- `docs/OMSI_SCENERY_3D.md` — the reporting contract, asset roots, and cache identity.
 
 That is the same two components from stop condition 5 (parser and resolver) plus
-reporting; no GPU code, no scene graph, no decoder.
+reporting; no GPU pipeline change, no scene graph, no decoder.
 
 ## Local verification status
 
@@ -484,20 +497,22 @@ reporting; no GPU code, no scene graph, no decoder.
 | --- | --- |
 | Read the O3D decoder and the engine's O3D documentation | PASS (macOS) |
 | Establish that no engine option enables scrambled decoding | PASS (macOS, source inspection) |
+| Build `Nymeria.OMSI.slnx` in Release | PASS (macOS), 0 warnings, 0 errors |
+| Run `tests/Nymeria.OMSI.Tests` | PASS (macOS), 282 tests |
 | Hexdump a real scrambled and unscrambled O3D | NOT RUN (no OMSI installation; owner command in D1) |
-| Census the 974 unsupported keywords | NOT RUN (owner command in D3) |
+| Census the 974 unsupported keywords against real content | NOT RUN (owner command in D3; the loader now prints its own per-keyword census) |
 | Verify the permitted texture roots against real files | NOT RUN (owner commands in D2) |
-| Name a placement anchor | NOT RUN (owner input, D4) |
-| Build and test | Not applicable — no code changed |
+| Name a placement anchor | NOT RUN (owner chose to skip, D4) |
+| Run `--scene-3d` and read a real summary | NOT RUN (Windows; owner checklist) |
 
 ## Suggested sequencing
 
-1. **Engine task:** add scrambled-vertex decoding to `Nymeria.Formats.O3d` upstream
-   (own commit in the engine, own pointer-bump commit here, hashes recorded). This is
-   the change that turns 278 failed Grundorf placements into candidates. Until it
-   lands, no amount of work in this repository can draw them.
-2. **Task 06.2 (this task, resumed):** diagnostic classification, dedup with occurrence
-   counts, per-class summary counts, the derived verdict, the permitted-roots list,
-   the three-outcome material resolution, and the cache stamp. Then the Windows
-   checklist, where the remaining appearance questions (LOD, alpha, `texchanges`,
-   ground fit) become visible for the first time.
+1. **Engine task (still open):** add scrambled-vertex decoding to
+   `Nymeria.Formats.O3d` upstream (its own commit in the engine, its own pointer-bump
+   commit here, hashes recorded). That is the change that turns 278 failed Grundorf
+   placements into candidates; until it lands, no work in this repository can draw them.
+2. **Owner validation (next):** run the Windows checklist in
+   [OMSI_SCENERY_3D.md](OMSI_SCENERY_3D.md) against this build, so the classification
+   reports real measurements instead of the synthetic ones the tests use.
+3. **After both:** the appearance questions (LOD selection, alpha modes, `texchanges`,
+   ground fit) become visible for the first time, and become their own task.

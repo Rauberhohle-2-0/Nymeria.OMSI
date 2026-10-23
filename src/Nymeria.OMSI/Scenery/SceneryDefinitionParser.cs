@@ -60,8 +60,15 @@ internal static class SceneryDefinitionParser
     /// <summary>The largest number of <c>[matl]</c> entries read from one definition.</summary>
     internal const int MaxTextures = 256;
 
-    /// <summary>The largest number of distinct unsupported keywords reported.</summary>
-    internal const int MaxReportedUnsupportedKeywords = 8;
+    /// <summary>
+    /// The largest number of distinct uninterpreted keywords tracked per definition.
+    /// </summary>
+    /// <remarks>
+    /// The documented <c>.sco</c> vocabulary is a few dozen keywords, so this bound only
+    /// matters for hostile input. Occurrences beyond it are still counted in the total,
+    /// and the summary says the list is partial when that happens.
+    /// </remarks>
+    internal const int MaxDistinctKeywords = 256;
 
     /// <summary>The mesh file extensions Nymeria decodes.</summary>
     internal static readonly IReadOnlyList<string> SupportedMeshExtensions = [".o3d", ".x"];
@@ -121,21 +128,22 @@ internal static class SceneryDefinitionParser
 
         if (readFailed)
         {
-            return new SceneryParseResult(null, diagnostics.Diagnostics);
+            return new SceneryParseResult(null, diagnostics.Entries);
         }
 
         if (blocks.Count == 0)
         {
             diagnostics.Report(
+                SceneryDiagnosticClass.ParseError,
                 MapDiagnosticSeverity.Warning,
                 "The scenery definition has no [keyword] blocks, so it describes no " +
                 "model.",
                 scoPath);
 
-            return new SceneryParseResult(null, diagnostics.Diagnostics);
+            return new SceneryParseResult(null, diagnostics.Entries);
         }
 
-        var unsupported = new OrderedKeywordSet();
+        var unsupported = new KeywordCensus(MaxDistinctKeywords);
         bool usesAbsoluteHeight = false;
 
         foreach (KeywordBlock block in blocks)
@@ -172,6 +180,7 @@ internal static class SceneryDefinitionParser
             if (modelReference is null)
             {
                 diagnostics.Report(
+                    SceneryDiagnosticClass.ParseError,
                     MapDiagnosticSeverity.Warning,
                     "The [model] block has no parameter, so no model file is named.",
                     scoPath,
@@ -193,6 +202,7 @@ internal static class SceneryDefinitionParser
                 else
                 {
                     diagnostics.Report(
+                        SceneryDiagnosticClass.ParseError,
                         MapDiagnosticSeverity.Error,
                         "The [model] reference '" + modelReference +
                         "' could not be resolved: " + (resolution.Error ?? "unknown reason") +
@@ -212,6 +222,7 @@ internal static class SceneryDefinitionParser
             else
             {
                 diagnostics.Report(
+                    SceneryDiagnosticClass.ParseError,
                     MapDiagnosticSeverity.Warning,
                     "The [model] parameter '" + modelReference + "' is neither an " +
                     "existing model configuration nor a decodable mesh path, so it is " +
@@ -228,12 +239,13 @@ internal static class SceneryDefinitionParser
             !HasBlock(blocks, "mesh"))
         {
             diagnostics.Report(
+                SceneryDiagnosticClass.ParseError,
                 MapDiagnosticSeverity.Error,
                 "The definition names no model configuration, no model mesh, and no " +
                 "inline [mesh] block, so it describes no geometry.",
                 scoPath);
 
-            return new SceneryParseResult(null, diagnostics.Diagnostics);
+            return new SceneryParseResult(null, diagnostics.Entries);
         }
 
         if (usesExternalModelConfig)
@@ -245,7 +257,7 @@ internal static class SceneryDefinitionParser
 
             if (readFailed)
             {
-                return new SceneryParseResult(null, diagnostics.Diagnostics);
+                return new SceneryParseResult(null, diagnostics.Entries);
             }
 
             foreach (KeywordBlock block in meshBlocks)
@@ -293,6 +305,7 @@ internal static class SceneryDefinitionParser
                 if (meshReference is null)
                 {
                     diagnostics.Report(
+                        SceneryDiagnosticClass.ParseError,
                         MapDiagnosticSeverity.Warning,
                         "The [mesh] block has no parameter, so no mesh is named.",
                         scoPath,
@@ -343,6 +356,7 @@ internal static class SceneryDefinitionParser
         if (skippedMeshes > 0)
         {
             diagnostics.Report(
+                SceneryDiagnosticClass.NotAttempted,
                 MapDiagnosticSeverity.Warning,
                 string.Format(
                     CultureInfo.InvariantCulture,
@@ -355,6 +369,7 @@ internal static class SceneryDefinitionParser
         if (skippedTextures > 0)
         {
             diagnostics.Report(
+                SceneryDiagnosticClass.NotAttempted,
                 MapDiagnosticSeverity.Warning,
                 string.Format(
                     CultureInfo.InvariantCulture,
@@ -367,12 +382,13 @@ internal static class SceneryDefinitionParser
         if (meshes.Count == 0)
         {
             diagnostics.Report(
+                SceneryDiagnosticClass.ParseError,
                 MapDiagnosticSeverity.Error,
                 "No [mesh] block named a mesh file, so the definition describes no " +
                 "geometry.",
                 scoPath);
 
-            return new SceneryParseResult(null, diagnostics.Diagnostics);
+            return new SceneryParseResult(null, diagnostics.Entries);
         }
 
         var definition = new SceneryDefinition(
@@ -385,11 +401,10 @@ internal static class SceneryDefinitionParser
             usesAbsoluteHeight,
             meshes,
             textures,
-            unsupported.Names(MaxReportedUnsupportedKeywords),
-            unsupported.Count,
-            diagnostics.Diagnostics);
+            unsupported.Results(),
+            unsupported.Total);
 
-        return new SceneryParseResult(definition, diagnostics.Diagnostics);
+        return new SceneryParseResult(definition, diagnostics.Entries);
     }
 
     /// <summary>
@@ -411,12 +426,17 @@ internal static class SceneryDefinitionParser
                 "The mesh '" + reference + "' could not be resolved: " + referenceError;
 
             diagnostics.Report(
+                SceneryDiagnosticClass.ParseError,
                 MapDiagnosticSeverity.Warning,
                 rejected,
                 sourcePath,
                 lineNumber);
 
-            return new SceneryMeshReference(reference, null, rejected);
+            return new SceneryMeshReference(
+                reference,
+                null,
+                rejected,
+                SceneryDiagnosticClass.ParseError);
         }
 
         if (!IsSupportedMeshReference(reference))
@@ -428,12 +448,17 @@ internal static class SceneryDefinitionParser
                 string.Join(", ", SupportedMeshExtensions) + ".";
 
             diagnostics.Report(
+                SceneryDiagnosticClass.UnsupportedFormat,
                 MapDiagnosticSeverity.Warning,
                 message,
                 sourcePath,
                 lineNumber);
 
-            return new SceneryMeshReference(reference, null, message);
+            return new SceneryMeshReference(
+                reference,
+                null,
+                message,
+                SceneryDiagnosticClass.UnsupportedFormat);
         }
 
         SceneryPathResult resolution = ResolveAsset(
@@ -450,13 +475,18 @@ internal static class SceneryDefinitionParser
                 (resolution.Error ?? "unknown reason");
 
             diagnostics.Report(
+                ClassOf(resolution),
                 MapDiagnosticSeverity.Warning,
                 message,
                 sourcePath,
                 lineNumber);
         }
 
-        return new SceneryMeshReference(reference, resolution.Path, resolution.Error);
+        return new SceneryMeshReference(
+            reference,
+            resolution.Path,
+            resolution.Error,
+            resolution.IsResolved ? null : ClassOf(resolution));
     }
 
     /// <summary>
@@ -478,7 +508,43 @@ internal static class SceneryDefinitionParser
             reference,
             SceneryAssetKind.Texture);
 
-        return new SceneryTextureReference(reference, resolution.Path, resolution.Error);
+        return new SceneryTextureReference(
+            reference,
+            resolution.Path,
+            resolution.Error,
+            resolution.Status);
+    }
+
+    /// <summary>
+    /// Builds the readable list of folders a scenery asset reference is looked for in.
+    /// </summary>
+    /// <remarks>
+    /// The roots are printed unconditionally, not only inside a failure message, so a
+    /// run always states where it was allowed to look. The per-definition folders are
+    /// described rather than expanded, because they differ for every object.
+    /// </remarks>
+    /// <param name="contentRoot">The derived installation root.</param>
+    internal static string DescribeSearchRoots(string contentRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(contentRoot);
+
+        string globalTexture = Path.Combine(contentRoot, "Texture");
+
+        return contentRoot + "; " + globalTexture +
+            "; and, for each definition, its own folder, its 'model' and 'texture' " +
+            "subfolders, and the folder of its model configuration when [model] names " +
+            "one. No folder is searched recursively.";
+    }
+
+    /// <summary>
+    /// Maps a failed resolution to its class: a rejected reference is a content error,
+    /// a missing file is a missing asset.
+    /// </summary>
+    private static SceneryDiagnosticClass ClassOf(SceneryPathResult resolution)
+    {
+        return resolution.Status == SceneryPathStatus.Rejected
+            ? SceneryDiagnosticClass.ParseError
+            : SceneryDiagnosticClass.MissingAsset;
     }
 
     /// <summary>
@@ -691,7 +757,7 @@ internal static class SceneryDefinitionParser
 
         ConfigReadResult read = ConfigTextReader.Read(path, MaxConfigBytes, MaxConfigLines);
 
-        diagnostics.ReportRange(read.Diagnostics);
+        ReportRange(diagnostics, read.Diagnostics);
 
         if (read.Text is null)
         {
@@ -699,7 +765,7 @@ internal static class SceneryDefinitionParser
 
             if (read.FatalError is not null)
             {
-                diagnostics.Report(read.FatalError);
+                diagnostics.Report(SceneryDiagnosticClass.ParseError, read.FatalError);
             }
 
             return [];
@@ -713,9 +779,22 @@ internal static class SceneryDefinitionParser
             path,
             blockDiagnostics);
 
-        diagnostics.ReportRange(blockDiagnostics);
+        ReportRange(diagnostics, blockDiagnostics);
 
         return blocks;
+    }
+
+    /// <summary>
+    /// Records unclassified configuration-reader diagnostics as parse errors.
+    /// </summary>
+    private static void ReportRange(
+        SceneryDiagnostics diagnostics,
+        IEnumerable<MapDiagnostic> source)
+    {
+        foreach (MapDiagnostic diagnostic in source)
+        {
+            diagnostics.Report(SceneryDiagnosticClass.ParseError, diagnostic);
+        }
     }
 
     /// <summary>
@@ -824,28 +903,65 @@ internal static class SceneryDefinitionParser
     }
 
     /// <summary>
-    /// Records unsupported keywords once, in first-seen order.
+    /// Counts uninterpreted keywords by spelling.
     /// </summary>
-    private sealed class OrderedKeywordSet
+    /// <remarks>
+    /// Counting per keyword is the census Task 06.2 requires: a single total cannot say
+    /// whether the unread vocabulary is scripts and animations or something that
+    /// affects what is drawn. Spellings are compared case-insensitively because OMSI's
+    /// own keyword comparison does.
+    /// </remarks>
+    private sealed class KeywordCensus
     {
-        private readonly List<string> _names = [];
-        private readonly HashSet<string> _seen = new(StringComparer.OrdinalIgnoreCase);
+        private readonly int _maximumDistinct;
+        private readonly Dictionary<string, int> _counts = new(StringComparer.OrdinalIgnoreCase);
+        private readonly List<string> _order = [];
 
-        internal int Count { get; private set; }
+        internal KeywordCensus(int maximumDistinct)
+        {
+            _maximumDistinct = maximumDistinct;
+        }
+
+        internal int Total { get; private set; }
 
         internal void Add(string keyword)
         {
-            Count++;
+            Total++;
 
-            if (_seen.Add(keyword))
+            if (_counts.TryGetValue(keyword, out int count))
             {
-                _names.Add(keyword);
+                _counts[keyword] = count + 1;
+                return;
             }
+
+            if (_order.Count >= _maximumDistinct)
+            {
+                return;
+            }
+
+            _counts.Add(keyword, 1);
+            _order.Add(keyword);
         }
 
-        internal IReadOnlyList<string> Names(int maximum)
+        internal IReadOnlyList<SceneryKeywordCount> Results()
         {
-            return _names.Count <= maximum ? _names : [.. _names.Take(maximum)];
+            var results = new List<SceneryKeywordCount>(_order.Count);
+
+            foreach (string keyword in _order)
+            {
+                results.Add(new SceneryKeywordCount(keyword, _counts[keyword]));
+            }
+
+            results.Sort(static (left, right) =>
+            {
+                int byCount = right.Occurrences.CompareTo(left.Occurrences);
+
+                return byCount != 0
+                    ? byCount
+                    : string.Compare(left.Keyword, right.Keyword, StringComparison.Ordinal);
+            });
+
+            return results;
         }
     }
 }

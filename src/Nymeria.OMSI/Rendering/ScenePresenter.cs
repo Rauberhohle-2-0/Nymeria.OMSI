@@ -262,7 +262,7 @@ internal sealed class ScenePresenter : IFramePresenter
         : $"scenery upload: {_scenery.DrawnInstances} instance(s), " +
           $"{_scenery.DrawnSubsets} subset(s), {_scenery.UploadedMeshes} mesh(es), " +
           $"{_scenery.UploadedTextures} texture(s), " +
-          $"{_scenery.FailedInstances} not drawable";
+          $"{_scenery.FailedInstances} dropped by a GPU failure";
 
     /// <summary>
     /// Applies input, then draws one depth-tested frame of terrain and, when supplied,

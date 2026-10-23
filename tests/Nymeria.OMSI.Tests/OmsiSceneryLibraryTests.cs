@@ -1,5 +1,6 @@
 using System.Numerics;
 using Nymeria.Omsi.Maps;
+using Nymeria.Omsi.Rendering;
 using Nymeria.Omsi.Scenery;
 using Nymeria.Omsi.Terrain;
 using Nymeria.Omsi.World;
@@ -82,13 +83,13 @@ public sealed class OmsiSceneryLibraryTests
             TerrainHeightSampler.Create(terrain),
             installation.RootPath);
 
-        Assert.Equal(2, scene.Counts.PlacementsConsidered);
-        Assert.Equal(2, scene.Counts.InstancesCreated);
-        Assert.Equal(1, scene.Counts.ModelsLoaded);
+        Assert.Equal(2, scene.Counts.Placements.Considered);
+        Assert.Equal(2, scene.Counts.Placements.Instanced);
+        Assert.Equal(1, scene.Counts.Definitions.Loaded);
         Assert.Equal(2, scene.Instances.Count);
         Assert.Same(scene.Instances[0].Model, scene.Instances[1].Model);
-        Assert.Equal(1, scene.Counts.MeshesDecoded);
-        Assert.Equal(0, scene.Counts.UnresolvedReferences);
+        Assert.Equal(1, scene.Counts.Meshes.Decoded);
+        Assert.Equal(0, scene.Counts.Placements.Failures[SceneryDiagnosticClass.MissingAsset]);
     }
 
     [Fact]
@@ -108,17 +109,20 @@ public sealed class OmsiSceneryLibraryTests
             installation.RootPath);
 
         Assert.Empty(scene.Instances);
-        Assert.Equal(2, scene.Counts.PlacementsConsidered);
-        Assert.Equal(0, scene.Counts.ModelsLoaded);
+        Assert.Equal(2, scene.Counts.Placements.Considered);
+        Assert.Equal(0, scene.Counts.Definitions.Loaded);
 
         // The definition is parsed once, so the unsupported keyword occurs once, while
-        // both placements are still counted as failures.
+        // both placements are still counted as failures and the one broken definition is
+        // counted once.
         Assert.Equal(1, scene.Counts.UnsupportedKeywords);
-        Assert.Equal(2, scene.Counts.DefinitionFailures);
+        Assert.Equal(1, scene.Counts.Definitions.WithoutGeometry);
+        Assert.Equal(2, scene.Counts.Placements.Failures[SceneryDiagnosticClass.MissingAsset]);
+        Assert.Equal(2, scene.Counts.Placements.Failures.Total);
 
         Assert.Single(
             scene.Diagnostics,
-            diagnostic => diagnostic.Message.Contains(
+            diagnostic => diagnostic.Diagnostic.Message.Contains(
                 "could not be resolved",
                 StringComparison.Ordinal));
     }
@@ -138,12 +142,13 @@ public sealed class OmsiSceneryLibraryTests
             installation.RootPath);
 
         Assert.Single(scene.Instances);
-        Assert.Equal(1, scene.Counts.TexturesMissing);
+        Assert.Equal(1, scene.Counts.Subsets.WithoutTexture);
         Assert.Contains(
             scene.Diagnostics,
-            diagnostic => diagnostic.Message.Contains(
-                "The texture 'wall.bmp' could not be resolved",
-                StringComparison.Ordinal));
+            diagnostic => diagnostic.Kind == SceneryDiagnosticClass.MissingAsset &&
+                diagnostic.Diagnostic.Message.Contains(
+                    "The texture 'wall.bmp' declared by [matl] could not be resolved",
+                    StringComparison.Ordinal));
     }
 
     [Fact]
@@ -163,7 +168,7 @@ public sealed class OmsiSceneryLibraryTests
         // The tile is flat at 3 m and the placement z is 1 m: the object's origin is
         // at 4 m, not at 1 m and not snapped to the ground.
         Assert.Equal(4.0f, instance.Transform.Translation.Y, precision: 3);
-        Assert.Equal(0, scene.Counts.SkippedWithoutTerrain);
+        Assert.Equal(0, scene.Counts.Placements.WithoutTerrain);
     }
 
     [Fact]
@@ -178,10 +183,10 @@ public sealed class OmsiSceneryLibraryTests
             installation.RootPath);
 
         Assert.Empty(scene.Instances);
-        Assert.Equal(1, scene.Counts.SkippedWithoutTerrain);
+        Assert.Equal(1, scene.Counts.Placements.WithoutTerrain);
         Assert.Contains(
             scene.Diagnostics,
-            diagnostic => diagnostic.Message.Contains(
+            diagnostic => diagnostic.Diagnostic.Message.Contains(
                 "terrain-relative",
                 StringComparison.Ordinal));
     }
@@ -201,13 +206,13 @@ public sealed class OmsiSceneryLibraryTests
             installation.RootPath);
 
         Assert.Empty(scene.Instances);
-        Assert.Equal(1, scene.Counts.UnresolvedReferences);
+        Assert.Equal(1, scene.Counts.Placements.Failures[SceneryDiagnosticClass.MissingAsset]);
         Assert.Contains(
             scene.Diagnostics,
-            diagnostic => diagnostic.Message.Contains(
+            diagnostic => diagnostic.Diagnostic.Message.Contains(
                 "could not be resolved",
                 StringComparison.Ordinal) &&
-                diagnostic.LineNumber is not null);
+                diagnostic.Diagnostic.LineNumber is not null);
     }
 
     [Fact]
@@ -223,10 +228,10 @@ public sealed class OmsiSceneryLibraryTests
             contentRoot: null);
 
         Assert.Empty(scene.Instances);
-        Assert.Equal(0, scene.Counts.PlacementsConsidered);
+        Assert.Equal(0, scene.Counts.Placements.Considered);
         Assert.Contains(
             scene.Diagnostics,
-            diagnostic => diagnostic.Message.Contains(
+            diagnostic => diagnostic.Diagnostic.Message.Contains(
                 "installation root",
                 StringComparison.Ordinal));
     }
@@ -251,7 +256,48 @@ public sealed class OmsiSceneryLibraryTests
             model.Subsets,
             subset => subset.Material.BaseColorTexture is not null);
 
-        Assert.True(scene.Counts.TexturesDecoded > 0);
+        Assert.True(scene.Counts.Textures.Decoded > 0);
+    }
+
+    [Fact]
+    public void SummarizesALoadedSceneWithoutClaimingCompleteness()
+    {
+        using Installation installation = Installation.Create(objectPlacements: 2);
+
+        OmsiWorldModel world = OmsiWorldLoader.Load(installation.MapDirectory);
+        OmsiTerrainSet terrain = OmsiTerrainSet.Load(world);
+        OmsiSceneryLibrary scene = OmsiSceneryLibrary.Load(
+            world,
+            TerrainHeightSampler.Create(terrain),
+            installation.RootPath);
+
+        using var writer = new StringWriter();
+
+        ScenerySummaryWriter.Write(
+            writer,
+            world,
+            terrain,
+            installation.RootPath,
+            scene.Counts,
+            scene.Diagnostics,
+            scene.UnsupportedKeywords);
+
+        string text = writer.ToString();
+
+        Assert.StartsWith("scene: incomplete — 2 of 2 placement(s) instanced", text);
+        Assert.Contains(
+            "definitions: 1 loaded, 1 with drawable geometry, 0 without",
+            text,
+            StringComparison.Ordinal);
+        Assert.Contains("meshes: 1 file(s) decoded, 0 skipped (none)", text, StringComparison.Ordinal);
+        Assert.Contains("textures: 1 decoded, 0 skipped (none)", text, StringComparison.Ordinal);
+        Assert.Contains("placement skips: none", text, StringComparison.Ordinal);
+        Assert.Contains("unsupported definition keywords: none", text, StringComparison.Ordinal);
+        Assert.Contains(
+            "asset roots: " + installation.RootPath,
+            text,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("scene: complete", text, StringComparison.Ordinal);
     }
 
     [Fact]

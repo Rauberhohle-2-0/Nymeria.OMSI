@@ -345,8 +345,10 @@ internal static class Program
             Console.Out,
             world,
             terrain.Heightmaps.Count == 0 ? null : terrain,
-            scene,
-            hasContentRoot ? contentRoot : null);
+            hasContentRoot ? contentRoot : null,
+            scene.Counts,
+            scene.Diagnostics,
+            scene.UnsupportedKeywords);
 
         if (!hasContentRoot)
         {

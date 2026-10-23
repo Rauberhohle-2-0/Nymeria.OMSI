@@ -146,13 +146,26 @@ is reported as *unsupported format*, not skipped silently.
   DDS, JPEG, PNG, and TGA decoders. A `.bmp`, `.dds`, or `.tga` that the engine cannot
   decode is reported, and that subset falls back to the shared white texture with the
   material tint.
-- Material names come from the mesh itself. A subset whose material name matches a
-  declared `[matl]` entry uses that texture; otherwise the name is resolved as a
-  texture reference through the same documented texture folders. This is the name-based
-  rule OMSI meshes use, and it means `.x` models whose material names are arbitrary
-  labels (rather than texture file names) can show as missing textures. A texture that
-  cannot be resolved is reported once per distinct message, and the affected subset is
-  counted and drawn with its base color rather than hidden or replaced.
+- Material names come from the mesh itself, and OMSI has two name spaces here: the
+  mesh material (a key, often a file name, sometimes a bare label such as `Mat1`) and
+  the texture file named by the definition's `[matl]` blocks. A subset is resolved in
+  one of three ways, and the three are never conflated:
+
+  | Outcome | Rule | Counted as |
+  | --- | --- | --- |
+  | Declared mapping | the material name matches a `[matl]` entry, whose file decodes | texture decoded |
+  | Name-as-file | no `[matl]` match, but a texture file with that name resolves and decodes | texture decoded |
+  | Unmapped material | no `[matl]` match and no file of that name | `missing texture mapping`, one line per definition naming its labels |
+
+  An unmapped label is **not** a missing asset: there is no file to be missing, and
+  reporting it as one inflated the old counts on every object whose meshes use labels.
+  A declared `[matl]` whose file is absent is a missing asset, and one the engine cannot
+  decode is an unsupported format. In every failure case the subset is counted and
+  drawn with its base color rather than hidden or replaced.
+
+  OMSI binds a material to a texture **by name**. No source checked for this build
+  describes binding `[matl]` entries to material slots by declaration order, so
+  positional binding is not implemented; adding it would need a real example.
 - Every scenery material is drawn with a single 0.5 alpha test, which covers OMSI's
   one-bit transparency for foliage, railings, and window cut-outs. Per-material
   thresholds and blended transparency are not interpreted.
@@ -247,22 +260,75 @@ term, not OMSI's lighting model.
 
 ## Reported counts
 
-The summary prints measured numbers only, and distinguishes them from the *limits*:
+No number here is estimated, and no line is a success claim. The first line is a
+verdict: `scene: incomplete — …` whenever anything was skipped, and a scene where
+nothing became drawable says so instead of naming what it would have drawn. The word
+*rendered* is never printed as an achievement.
 
 ```text
+scene: incomplete — 817 of 1095 placement(s) instanced, 278 skipped; the classification is below
+scene content: decoded OMSI terrain with loaded OMSI scenery objects (a bounded, partial scene; …)
+map: <map folder>
+name: Grundorf
+content root: <installation root>
+asset roots: <root>; <root>\Texture; and, for each definition, its own folder, its 'model' and
+             'texture' subfolders, and its model configuration's folder; no recursive search
+coordinate grid: 300 m tiles (documented)
+terrain tiles: 19 decoded of 19 discovered
 placement budget: 2000 instances, 256 definitions, 512 meshes, 512 textures
-placements: N considered, M instanced, K reference(s) resolved
-assets: D definition(s), F mesh file(s), T texture(s) decoded, U subset(s) without a usable texture
-geometry: V vertices, S drawable subset(s) across the distinct definitions
-skipped: R unresolved reference(s), D definition(s) without drawable geometry,
-         T without decoded terrain, X invalid transform(s), L beyond a load limit
+placements: 1095 considered, 817 instanced, 817 with a loaded definition
+definitions: 78 loaded, 45 with drawable geometry, 33 without
+meshes: 28 file(s) decoded, 12 skipped (unsupported format 12)
+textures: 2 decoded, 0 skipped (none)
+subsets: 61 drawable, 58 drawn with their base color (missing texture mapping 58)
+placement skips: unsupported format 278
+geometry: 4607 vertices across the distinct definitions
+skipped: 0 without decoded terrain, 0 invalid transform(s)
+unsupported definition keywords (out of scope by design): 974 occurrence(s) across N keyword(s)
+  [script] 120
+  …
+cache: 78 definition(s), 28 mesh file(s), 2 texture(s) keyed by resolved path, each with a
+       (size, last-write time) stamp; 0 re-decoded mid-run
+scenery diagnostics: 41 distinct
+  [unsupported format] …\Haus01c.o3d: warning: The mesh 'Haus01c.o3d' could not be decoded:
+      unsupported: scrambled O3D — … (x12)
 ```
+
+Every skipped asset carries exactly one class:
+
+| Class | Meaning |
+| --- | --- |
+| `missing asset` | the referenced file does not exist (a `.sco`, a mesh, or a declared texture) |
+| `unsupported format` | the file exists and the decoder refused it: scrambled O3D vertices, an unknown texture encoding, or a documented size limit |
+| `parse error` | the file exists but its content is malformed, or a placement's transform is unusable |
+| `GPU failure` | a resource could not be created or uploaded; counted by the renderer and printed in the upload line |
+| `out of scope by design` | scripts, animation, interaction, paths, sounds, traffic lights, collision — present in real content and deliberately not interpreted |
+| `not yet attempted` | skipped because a documented budget was reached |
+| `missing texture mapping` | a material label with no `[matl]` binding and no file of that name |
+
+Diagnostics are deduplicated by `(canonical path, class)`: one line names the asset and
+the reason, and identical failures elsewhere carry an occurrence counter `(xN)`. The path
+is the failing asset's own file, the tile file for a placement-level failure, or — when
+the failure has no file at all — its message. Repeated occurrences beyond the listed
+twelve are counted in a final line, so a truncated list is never mistaken for a complete
+one.
 
 The per-run upload summary is printed after the window closes:
 
 ```text
-scenery upload: 137 instance(s), 402 subset(s), 68 mesh(es), 91 texture(s), 0 not drawable
+scenery upload: 137 instance(s), 402 subset(s), 68 mesh(es), 91 texture(s), 0 dropped by a GPU failure
 ```
+
+### Cache identity
+
+The definition, mesh, and texture caches are keyed by resolved path and live for one
+load. Each entry also records a `(size, last-write time)` stamp; when a cached asset is
+reused, the stamp is compared with the file, and a changed size or time makes the entry
+be decoded again instead of drawn from stale data. The stamp is a one-run guard, not a
+content identity: last-write time is coarse on FAT and network volumes, archiving tools
+preserve it, and a size plus a timestamp can collide. Nothing is persisted, so there is
+no cross-run cache to invalidate; a future one would need a hash of the bytes the
+decoders already read.
 
 ## Unverified assumptions
 
@@ -283,7 +349,8 @@ read or copied):
 | Textures may live in the object folder, its `texture` subfolder, or `<root>\Texture` | Documented |
 | `.dds` wins over the declared texture extension when both exist | Documented; the resolver tries `.dds` first |
 | `[model]` points at a further configuration file | Documented; the reader still accepts both forms and reports which was used |
-| Material-name to texture matching | **Inferred** from OMSI mesh behavior; the documented folder rules are used for resolution |
+| Material-name to texture matching | Documented that a mesh material is a key named by `[matl]`/`[texchanges]`/`[CTCTexture]`; the fallback that treats the name as a file name is **inferred** from OMSI mesh behavior |
+| Positional `[matl]` binding (slot order) | **Not implemented**; no source checked describes it |
 | Pitch/bank order and sign | **Assumed**; documented only for heading |
 | Alpha test threshold 0.5 for all scenery | **Assumed**; per-material thresholds are not interpreted |
 | OMSI grid orientation, terrain relief, and object placement on Windows | **Unverified** until the owner runs it |
@@ -295,22 +362,33 @@ read or copied):
 2. Confirm `--map` and `--world` still parse Grundorf.
 3. Confirm `--map <Grundorf> --render` still shows the diagnostic plan.
 4. Confirm `--terrain-3d` still draws terrain without scenery.
-5. Run `--scene-3d` and check that at least one **identifiable real object** — a known
-   building, tree, or street lamp — appears at its correct place and orientation, and
-   that its texture is the real one:
+5. Run `--scene-3d` and read the verdict and classification first:
    ```bat
    src\Nymeria.OMSI\bin\Release\net10.0\Nymeria.OMSI.exe --map "<path>\OMSI 2\maps\Grundorf" --scene-3d
    ```
+   The first line must be `scene: incomplete — …` and the `asset roots` line must name
+   the installation root and its `Texture` folder. No named placement anchor exists for
+   this task, so the visual check is: whatever *is* listed as instanced appears in the
+   expected area at its claimed height and heading, and any building that is absent is
+   named by a diagnostic with its reason. Scrambled O3D meshes are expected to be absent
+   and classified as `unsupported format` until Nymeria decodes them; see
+   [OMSI_SCENERY_06_2_FINDINGS.md](OMSI_SCENERY_06_2_FINDINGS.md).
 6. Move with `W/A/S/D`, rise with `Space`, descend with `Ctrl`, speed up with `Shift`,
    look with the right mouse button held, reset with `R`, resize the window, and close
    it normally.
-7. Read the summary: `placements`, `assets`, `skipped`, and the listed diagnostics must
-   explain anything missing. A missing asset is a diagnostic, never a substituted box.
-8. If objects sit too high, too low, mirrored, or rotated, record which one and in what
+7. Check that the summary explains everything missing: each of `placements`,
+   `definitions`, `meshes`, `textures`, `subsets`, `placement skips` must break a total
+   down by class, the keyword census must name the unread vocabulary with counts, and
+   each listed diagnostic must carry its class and, when it repeated, an `(xN)`
+   counter. A missing asset is a diagnostic, never a substituted box.
+8. Confirm the scene stays `incomplete` and never prints `scene: complete`, and that the
+   upload line reports GPU failures as `dropped by a GPU failure` rather than folding
+   them into a generic count.
+9. If objects sit too high, too low, mirrored, or rotated, record which one and in what
    way: height semantics, the basis change, and the pitch/bank convention are each one
    clearly isolated expression.
-9. Optionally repeat on Berlin-Spandau as a bounded stress check. Incomplete scenery
-   there is expected and is not a failure as long as the counts say so.
+10. Optionally repeat on Berlin-Spandau as a bounded stress check. Incomplete scenery
+    there is expected and is not a failure as long as the counts say so.
 
 Useful diagnostic runs:
 
@@ -325,6 +403,11 @@ rem Terrain only, for comparison
 ## Known limitations
 
 - The scene is a bounded prefix of placements, not the whole map.
+- **Scrambled O3D meshes cannot be decoded.** Most stock O3D files store their vertex
+  records scrambled with a key such as `0x00000000`, and the pinned engine's decoder
+  accepts only `0xFFFFFFFF`. Every such mesh is classified as `unsupported format` with
+  the reason in the message. Decoding them needs a change in Nymeria; see
+  [OMSI_SCENERY_06_2_FINDINGS.md](OMSI_SCENERY_06_2_FINDINGS.md).
 - Splines and roads, vehicles, scripts, animation, collision, night lighting, shadows,
   water, terrain holes, and ground textures are not implemented.
 - There is no frustum or distance culling: every loaded instance of every prepared model

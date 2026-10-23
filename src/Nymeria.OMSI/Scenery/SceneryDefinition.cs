@@ -8,10 +8,16 @@ namespace Nymeria.Omsi.Scenery;
 /// <param name="Reference">The reference exactly as written in the source file.</param>
 /// <param name="Path">The resolved file, or <see langword="null"/> when it is absent.</param>
 /// <param name="Error">A readable explanation when no file was resolved.</param>
+/// <param name="Failure">
+/// Why this reference produced no file, or <see langword="null"/> when it resolved. A
+/// definition whose meshes all fail reports the first of these classes, so a missing
+/// mesh is not reported as an unsupported format.
+/// </param>
 internal readonly record struct SceneryMeshReference(
     string Reference,
     string? Path,
-    string? Error)
+    string? Error,
+    SceneryDiagnosticClass? Failure)
 {
     /// <summary>Gets a value indicating whether the mesh file exists.</summary>
     internal bool IsResolved => Path is not null;
@@ -23,10 +29,26 @@ internal readonly record struct SceneryMeshReference(
 /// <param name="Reference">The texture name as written, without resolution attempts.</param>
 /// <param name="Path">The resolved texture file, or <see langword="null"/>.</param>
 /// <param name="Error">A readable explanation when no file was resolved.</param>
+/// <param name="Status">
+/// Whether the reference was resolved, rejected before touching the filesystem, or not
+/// found. A drawn subset uses it to classify its missing texture.
+/// </param>
 internal readonly record struct SceneryTextureReference(
     string Reference,
     string? Path,
-    string? Error);
+    string? Error,
+    SceneryPathStatus Status)
+{
+    /// <summary>Gets a value indicating whether a texture file was resolved.</summary>
+    internal bool IsResolved => Path is not null;
+}
+
+/// <summary>
+/// One definition keyword this build does not interpret, and how often it occurred.
+/// </summary>
+/// <param name="Keyword">The keyword as written, without its brackets.</param>
+/// <param name="Occurrences">How many blocks used it.</param>
+internal readonly record struct SceneryKeywordCount(string Keyword, int Occurrences);
 
 /// <summary>
 /// A parsed OMSI scenery definition: the subset needed to load and place a static
@@ -64,9 +86,8 @@ internal sealed class SceneryDefinition
         bool usesAbsoluteHeight,
         IReadOnlyList<SceneryMeshReference> meshes,
         IReadOnlyList<SceneryTextureReference> textures,
-        IReadOnlyList<string> unsupportedKeywords,
-        int unsupportedKeywordCount,
-        IReadOnlyList<MapDiagnostic> diagnostics)
+        IReadOnlyList<SceneryKeywordCount> unsupportedKeywords,
+        int unsupportedKeywordCount)
     {
         Reference = reference;
         ScoPath = scoPath;
@@ -79,7 +100,6 @@ internal sealed class SceneryDefinition
         Textures = [.. textures];
         UnsupportedKeywords = [.. unsupportedKeywords];
         UnsupportedKeywordCount = unsupportedKeywordCount;
-        Diagnostics = [.. diagnostics];
     }
 
     /// <summary>Gets the reference as written in the tile file.</summary>
@@ -122,22 +142,19 @@ internal sealed class SceneryDefinition
     internal IReadOnlyList<SceneryTextureReference> Textures { get; }
 
     /// <summary>
-    /// Gets the distinct keywords that were not interpreted, in first-seen order.
+    /// Gets the distinct keywords that were not interpreted, most frequent first.
     /// </summary>
-    internal IReadOnlyList<string> UnsupportedKeywords { get; }
+    internal IReadOnlyList<SceneryKeywordCount> UnsupportedKeywords { get; }
 
     /// <summary>Gets the number of occurrences of uninterpreted keywords.</summary>
     internal int UnsupportedKeywordCount { get; }
-
-    /// <summary>Gets the parse warnings and errors, each with its line number.</summary>
-    internal IReadOnlyList<MapDiagnostic> Diagnostics { get; }
 }
 
 /// <summary>
 /// The outcome of parsing one scenery definition.
 /// </summary>
 /// <param name="Definition">The parsed definition, or <see langword="null"/> on failure.</param>
-/// <param name="Diagnostics">Why parsing failed or what was not interpreted.</param>
+/// <param name="Diagnostics">Why parsing failed or what was not interpreted, with each entry classified.</param>
 internal sealed record SceneryParseResult(
     SceneryDefinition? Definition,
-    IReadOnlyList<MapDiagnostic> Diagnostics);
+    IReadOnlyList<SceneryDiagnosticEntry> Diagnostics);

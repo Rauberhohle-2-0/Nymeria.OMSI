@@ -95,7 +95,7 @@ public sealed class SceneryDefinitionParserTests
         Assert.NotNull(result.Definition);
         Assert.DoesNotContain(
             result.Diagnostics,
-            diagnostic => diagnostic.Message.Contains(
+            diagnostic => diagnostic.Diagnostic.Message.Contains(
                 "no [model]",
                 StringComparison.OrdinalIgnoreCase));
     }
@@ -278,8 +278,12 @@ public sealed class SceneryDefinitionParserTests
 
         Assert.NotNull(result.Definition);
         Assert.Equal(2, result.Definition!.UnsupportedKeywordCount);
-        Assert.Contains("script", result.Definition.UnsupportedKeywords);
-        Assert.Contains("animations", result.Definition.UnsupportedKeywords);
+        Assert.Contains(
+            result.Definition.UnsupportedKeywords,
+            keyword => keyword.Keyword == "script" && keyword.Occurrences == 1);
+        Assert.Contains(
+            result.Definition.UnsupportedKeywords,
+            keyword => keyword.Keyword == "animations" && keyword.Occurrences == 1);
     }
 
     [Fact]
@@ -297,7 +301,7 @@ public sealed class SceneryDefinitionParserTests
         Assert.False(result.Definition!.Meshes[0].IsResolved);
         Assert.Contains(
             result.Diagnostics,
-            diagnostic => diagnostic.Message.Contains(
+            diagnostic => diagnostic.Diagnostic.Message.Contains(
                 "does not decode",
                 StringComparison.Ordinal));
     }
@@ -315,7 +319,7 @@ public sealed class SceneryDefinitionParserTests
         Assert.False(result.Definition!.Meshes[0].IsResolved);
         Assert.Contains(
             result.Diagnostics,
-            diagnostic => diagnostic.Message.Contains("..", StringComparison.Ordinal));
+            diagnostic => diagnostic.Diagnostic.Message.Contains("..", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -331,7 +335,7 @@ public sealed class SceneryDefinitionParserTests
         Assert.False(result.Definition!.Meshes[0].IsResolved);
         Assert.Contains(
             result.Diagnostics,
-            diagnostic => diagnostic.Message.Contains(
+            diagnostic => diagnostic.Diagnostic.Message.Contains(
                 "climbs above",
                 StringComparison.Ordinal));
     }
@@ -348,7 +352,7 @@ public sealed class SceneryDefinitionParserTests
         Assert.Null(result.Definition);
         Assert.Contains(
             result.Diagnostics,
-            diagnostic => diagnostic.Severity == MapDiagnosticSeverity.Error);
+            diagnostic => diagnostic.Diagnostic.Severity == MapDiagnosticSeverity.Error);
     }
 
     [Fact]
@@ -364,7 +368,7 @@ public sealed class SceneryDefinitionParserTests
         Assert.Null(result.Definition);
         Assert.Contains(
             result.Diagnostics,
-            diagnostic => diagnostic.Severity == MapDiagnosticSeverity.Error);
+            diagnostic => diagnostic.Diagnostic.Severity == MapDiagnosticSeverity.Error);
     }
 
     [Fact]
@@ -379,10 +383,10 @@ public sealed class SceneryDefinitionParserTests
         Assert.Null(result.Definition);
         Assert.Contains(
             result.Diagnostics,
-            diagnostic => diagnostic.Message.Contains(
+            diagnostic => diagnostic.Diagnostic.Message.Contains(
                 "no geometry",
                 StringComparison.Ordinal) ||
-                diagnostic.Message.Contains("could not be resolved", StringComparison.Ordinal));
+                diagnostic.Diagnostic.Message.Contains("could not be resolved", StringComparison.Ordinal));
     }
 
     private static SceneryParseResult Parse(Fixture fixture)
