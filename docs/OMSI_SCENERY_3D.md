@@ -141,7 +141,10 @@ is reported as *unsupported format*, not skipped silently.
 - Meshes are decoded by the engine's own parsers —
   `Nymeria.Formats.O3d.O3dModelParser` and
   `Nymeria.Formats.DirectX.XModelParser` — through the engine's `IModelParser`
-  contract. This repository contains no mesh decoder.
+  contract. This repository contains no mesh decoder. Version 4+ O3D files whose
+  vertex key is not `0xFFFFFFFF` store their vertex records scrambled; the engine
+  undoes that transform before validating them, so the ordinary stock key `0`
+  decodes instead of being refused as unsupported.
 - Textures are decoded by the engine's `TextureLoader`, which dispatches to its BMP,
   DDS, JPEG, PNG, and TGA decoders. A `.bmp`, `.dds`, or `.tga` that the engine cannot
   decode is reported, and that subset falls back to the shared white texture with the
@@ -290,8 +293,8 @@ unsupported definition keywords (out of scope by design): 974 occurrence(s) acro
 cache: 78 definition(s), 28 mesh file(s), 2 texture(s) keyed by resolved path, each with a
        (size, last-write time) stamp; 0 re-decoded mid-run
 scenery diagnostics: 41 distinct
-  [unsupported format] …\Haus01c.o3d: warning: The mesh 'Haus01c.o3d' could not be decoded:
-      unsupported: scrambled O3D — … (x12)
+  [unsupported format] …\Haus01c.o3d: warning: The mesh 'Haus01c.o3d' could not be
+      decoded: … (x12)
 ```
 
 Every skipped asset carries exactly one class:
@@ -299,7 +302,7 @@ Every skipped asset carries exactly one class:
 | Class | Meaning |
 | --- | --- |
 | `missing asset` | the referenced file does not exist (a `.sco`, a mesh, or a declared texture) |
-| `unsupported format` | the file exists and the decoder refused it: scrambled O3D vertices, an unknown texture encoding, or a documented size limit |
+| `unsupported format` | the file exists and the decoder refused it: an O3D section or feature this build does not decode, an unknown texture encoding, or a documented size limit |
 | `parse error` | the file exists but its content is malformed, or a placement's transform is unusable |
 | `GPU failure` | a resource could not be created or uploaded; counted by the renderer and printed in the upload line |
 | `out of scope by design` | scripts, animation, interaction, paths, sounds, traffic lights, collision — present in real content and deliberately not interpreted |
@@ -370,8 +373,10 @@ read or copied):
    the installation root and its `Texture` folder. No named placement anchor exists for
    this task, so the visual check is: whatever *is* listed as instanced appears in the
    expected area at its claimed height and heading, and any building that is absent is
-   named by a diagnostic with its reason. Scrambled O3D meshes are expected to be absent
-   and classified as `unsupported format` until Nymeria decodes them; see
+   named by a diagnostic with its reason. Scrambled O3D meshes (key `0x00000000`) are
+   expected to load now; a mesh that decodes to shredded or inside-out geometry is the
+   one failure the decoder cannot detect, because the transform preserves extents and
+   normal lengths. Record the file name if that happens; see
    [OMSI_SCENERY_06_2_FINDINGS.md](OMSI_SCENERY_06_2_FINDINGS.md).
 6. Move with `W/A/S/D`, rise with `Space`, descend with `Ctrl`, speed up with `Shift`,
    look with the right mouse button held, reset with `R`, resize the window, and close
@@ -403,11 +408,12 @@ rem Terrain only, for comparison
 ## Known limitations
 
 - The scene is a bounded prefix of placements, not the whole map.
-- **Scrambled O3D meshes cannot be decoded.** Most stock O3D files store their vertex
-  records scrambled with a key such as `0x00000000`, and the pinned engine's decoder
-  accepts only `0xFFFFFFFF`. Every such mesh is classified as `unsupported format` with
-  the reason in the message. Decoding them needs a change in Nymeria; see
-  [OMSI_SCENERY_06_2_FINDINGS.md](OMSI_SCENERY_06_2_FINDINGS.md).
+- **A wrong scramble key is not detectable.** Scrambled O3D records decode with the
+  documented transform, but that transform only permutes and negates components, so a
+  key that does not match the data yields plausible-but-wrong geometry rather than an
+  error. The engine's fail-safe rejects damaged records (non-finite values, an extent
+  over 10,000 units), and nothing more. Confirm on Windows that key-`0` buildings look
+  correct; see [OMSI_SCENERY_06_2_FINDINGS.md](OMSI_SCENERY_06_2_FINDINGS.md).
 - Splines and roads, vehicles, scripts, animation, collision, night lighting, shadows,
   water, terrain holes, and ground textures are not implemented.
 - There is no frustum or distance culling: every loaded instance of every prepared model

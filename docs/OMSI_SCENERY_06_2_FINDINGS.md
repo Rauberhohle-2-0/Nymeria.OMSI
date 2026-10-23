@@ -1,12 +1,14 @@
 # Task 06.2 discovery findings — O3D scrambling, texture mapping, diagnostic truth
 
-Status: discovery complete, and the implementation that stays inside this repository's
-boundaries has landed after the owner's decision: diagnostic classification,
-deduplication with occurrence counters, per-class counts, the honest verdict, the printed
-asset roots, the three-outcome material resolution, and the cache stamp. **Scrambled O3D
-decoding was not implemented**: stop condition 1 triggered (see [Stop-condition
-events](#stop-condition-events)), because the fix requires a change in
-`external/Nymeria/`, which this task did not make. `external/Nymeria/` is unmodified.
+Status: discovery complete, and both halves of the work have landed. The part that
+stays inside this repository: diagnostic classification, deduplication with occurrence
+counters, per-class counts, the honest verdict, the printed asset roots, the
+three-outcome material resolution, and the cache stamp. The O3D scrambling itself was
+stop condition 1 at discovery time and was implemented afterwards, with the owner's
+explicit authorization, as an engine change: Nymeria commit
+`e9baf833909323ed95ee614f766a3ed86c150249` (from the previous pin
+`6e727248627692a663b0651f09be2c662ed14681`), consumed here as the reviewed submodule
+pointer bump. See [upstream/nymeria-scrambled-o3d.md](upstream/nymeria-scrambled-o3d.md).
 
 This note is the mandated discovery deliverable for Task 06.2 and must be committed
 before any code change. It is deliberately blunt about which claims are established
@@ -458,16 +460,17 @@ implementation phase of Task 06.2 except where the table says otherwise:
 
 | # | Condition | Status |
 | --- | --- | --- |
-| 1 | D1 concludes the scrambling fix requires changes inside `external/Nymeria` | **TRIGGERED** (see D1) |
+| 1 | D1 concludes the scrambling fix requires changes inside `external/Nymeria` | **TRIGGERED** (see D1), then **resolved** by an authorized engine commit `e9baf83` and its pointer bump |
 | 2 | D2 concludes a correct fix needs a new decoding backend or file format | Not triggered. Texture mapping is a resolver change over existing decoders |
 | 3 | D3 reveals a significant fraction of the 974 keywords is required for the anchor | Not triggered — assessment only, census pending |
 | 4 | The D4 anchor cannot be reached with the current `.sco` subset even after texture resolution | Cannot be assessed: no anchor named |
 | 5 | A change would touch more than two of {`.sco` parser, asset resolver, O3D decoder, texture pipeline, GPU resource ownership, scene graph} | Not triggered by the plan below. Without scrambling, the plan touches the `.sco` parser (keyword census) and the asset resolver (material mapping) — two. Adding the O3D decoder would make three, which is why scrambling is not attempted here |
 
 Per the task's stopping rule, the note was committed and the owner was asked before any
-implementation proceeded. The owner's decision was recorded as: **proceed without
-scrambling**, and **no placement anchor** (D4). The implementation described above is the
-result; the engine change D1 recommends remains open.
+implementation proceeded. The first decision was recorded as: **proceed without
+scrambling**, and **no placement anchor** (D4). The owner then authorized the engine
+change, which landed as Nymeria `e9baf83`; the submodule pointer records it. The
+in-repository work described above is otherwise unchanged.
 
 ## What Task 06.2 changed
 
@@ -507,12 +510,13 @@ reporting; no GPU pipeline change, no scene graph, no decoder.
 
 ## Suggested sequencing
 
-1. **Engine task (still open):** add scrambled-vertex decoding to
-   `Nymeria.Formats.O3d` upstream (its own commit in the engine, its own pointer-bump
-   commit here, hashes recorded). That is the change that turns 278 failed Grundorf
-   placements into candidates; until it lands, no work in this repository can draw them.
+1. **Engine task (done):** scrambled-vertex decoding in `Nymeria.Formats.O3d` landed as
+   engine commit `e9baf833909323ed95ee614f766a3ed86c150249`, consumed by the
+   pointer-bump commit recorded in [ARCHITECTURE.md](ARCHITECTURE.md#engine-dependency-decision).
+   That is the change that turns the 278 failed Grundorf placements into candidates.
 2. **Owner validation (next):** run the Windows checklist in
    [OMSI_SCENERY_3D.md](OMSI_SCENERY_3D.md) against this build, so the classification
-   reports real measurements instead of the synthetic ones the tests use.
+   reports real measurements instead of the synthetic ones the tests use, and so the
+   decoded key-`0` buildings can be compared with OMSI's own picture.
 3. **After both:** the appearance questions (LOD selection, alpha modes, `texchanges`,
    ground fit) become visible for the first time, and become their own task.

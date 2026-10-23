@@ -1,7 +1,8 @@
 # Upstream change request: scrambled O3D vertex data
 
-Status: **approved by the owner**, scope fixed, not yet implemented in the engine.
-Raised by Task 06.2, approved for Task 06.3.
+Status: **implemented** in the engine as commit
+`e9baf833909323ed95ee614f766a3ed86c150249`, and consumed here by the submodule
+pointer bump. Raised by Task 06.2, approved for Task 06.3.
 
 - Repository: `Nymeria` (engine, pinned submodule at `external/Nymeria/`)
 - Area: `src/formats/Nymeria.Formats.O3d/O3dModelParser.cs`, `docs/O3D.md`,
@@ -57,5 +58,23 @@ OMSI host would duplicate the format and split the truth about what is supported
 
 ## Resolution
 
-To be completed when the engine commit lands: record the engine commit hash, the date,
-and the superproject pointer-bump commit here, then mark this note solved.
+Solved on 2026-10-23.
+
+| Item | Value |
+| --- | --- |
+| Engine repository, area | `Nymeria`, `src/formats/Nymeria.Formats.O3d`, `docs/O3D.md`, its test project |
+| Previous pin | `6e727248627692a663b0651f09be2c662ed14681` |
+| Engine commit | `e9baf833909323ed95ee614f766a3ed86c150249` (`feat: decode scrambled O3D vertex records`) |
+| Superproject change | the submodule pointer commit that records the new pin |
+| Public API | unchanged; `new O3dModelParser(name).Parse(stream)` behaves as before for key `0xFFFFFFFF` |
+
+The implementation follows the algorithm note exactly and keeps the four settled
+ambiguities as recorded there. Validation on macOS: the engine solution builds with 0
+warnings, and its suite passes (1,133 tests, 2 skipped), including the new scrambled
+coverage. Windows rendering of real Grundorf meshes is `NOT RUN (owner validation
+pending)`: the decode is proven against an independent writer and a documented byte
+fixture, not against the owner's assets.
+
+The engine commit was made locally and is **not pushed** by the agent; the pointer bump
+references it, so the owner must push the engine repository first for a fresh clone or
+CI to resolve the pin.

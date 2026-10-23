@@ -5,6 +5,11 @@ Read with [nymeria-scrambled-o3d.md](nymeria-scrambled-o3d.md) (the approved ups
 request) and [../OMSI_SCENERY_06_2_FINDINGS.md](../OMSI_SCENERY_06_2_FINDINGS.md)
 (how the rejection surfaced).
 
+**Implemented** as engine commit `e9baf833909323ed95ee614f766a3ed86c150249`. The
+sections below are unchanged discovery: the implementation followed the patch plan in
+D2 and kept all four resolutions from D1.4. Two verification results were added after
+the fact and are recorded in [D1.8](#d18-implementation-verification).
+
 Development environment for this note: **macOS, no OMSI installation**. That shapes
 what can be proven here and what cannot; see [Evidence status](#evidence-status).
 
@@ -183,6 +188,22 @@ Get-ChildItem $root -Recurse -Filter *.o3d -ErrorAction SilentlyContinue | ForEa
 | The implementation is the exact inverse of the writer direction | Synthetic round-trip, bit-exact except `-0.0` equality (engine test) | Verified locally |
 | Decoding real Grundorf meshes produces correct geometry | — | **NOT RUN** (no OMSI install; Windows run pending) |
 | A wrong decode is caught by the fail-safe | Analysis: permutation preserves extents and normal lengths | **Disproved** — see D1.5; visual check is the gate |
+
+### D1.8 Implementation verification
+
+| Claim | Basis | Status |
+| --- | --- | --- |
+| The D1.6 fixture decodes to its plain records | Engine test `DecodesTheDocumentedScrambledFixture`; the states it pins are 0, 168, and 339 | PASS (macOS) |
+| The decode agrees with an independent writer across versions, flags, and keys | Engine test `DecodesScrambledVertexRecords` with an independently written writer-direction fixture | PASS (macOS) |
+| Key `0xFFFFFFFF` still decodes exactly as before | The existing version/flag matrix tests plus `OpenKeyLeavesRecordsPlainEvenWithTheAlternateFlag` | PASS (macOS) |
+| Relabelling scrambled bytes as plain does not yield the original geometry | Engine test `ScrambledRecordsAreNotReadAsPlainGeometry` | PASS (macOS) |
+| Damaged records are rejected | Engine tests for the extent limit, truncation, a non-finite value, and a bad index after decoding | PASS (macOS) |
+| Real Grundorf meshes decode correctly | — | **NOT RUN** (Windows; the visual check in [../OMSI_SCENERY_3D.md](../OMSI_SCENERY_3D.md) is the gate) |
+
+One correction to the arithmetic as first written here: the `key == 0` reset runs at
+the top of every vertex iteration, so the state does not accumulate across vertices in
+stock files. A first hand check that carried the previous state forward disagreed with
+the D1.6 fixture; the fixture is right, and the implementation follows it.
 
 ## D2 — The existing parser, and the minimal patch
 

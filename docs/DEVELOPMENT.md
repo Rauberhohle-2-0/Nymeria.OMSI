@@ -114,7 +114,7 @@ Notes:
 - Builds are warning-free by policy: `TreatWarningsAsErrors` is enabled in
   [Directory.Build.props](../Directory.Build.props) for this repository's
   projects, and the engine keeps its own settings.
-- The test project runs 268 headless tests. They cover command-line parsing, the
+- The test project runs 283 headless tests. They cover command-line parsing, the
   GPU-free map metadata layer (text encoding selection and fallbacks, keyword-block
   tokenizing, tile file-name parsing, discovery ordering, duplicates, unsupported
   directives, summary output), the GPU-free tile/world layer (record layouts by
@@ -139,6 +139,13 @@ Notes:
   synthetic `.x` mesh and bitmap fixture).
   They create no window, no GPU device, and no audio device, and they use only
   synthetic strings and byte arrays written by the tests.
+- The pinned engine's own suite covers O3D scrambling: an independent writer-direction
+  transcription, a documented byte fixture, the plain-key path, the extent fail-safe,
+  and truncated or non-finite records. That suite belongs to the engine repository and
+  is **not** run by this repository's CI, so a change here cannot claim it passed;
+  run it with
+  `dotnet test external/Nymeria/tests/Nymeria.Formats.O3d.Tests/Nymeria.Formats.O3d.Tests.csproj -c Release`
+  when the pointer or the decoder is touched.
 - The host itself, including `--map`, `--world`, `--render`, `--terrain-3d`, and
   `--scene-3d`, is **not** executed on macOS in any task. `dotnet build` and the tests
   prove compilation, parser, decoder, and geometry behavior, nothing more. A passing
