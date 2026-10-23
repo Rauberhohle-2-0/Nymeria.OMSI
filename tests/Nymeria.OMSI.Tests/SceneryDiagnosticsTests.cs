@@ -148,13 +148,11 @@ public sealed class SceneryDiagnosticsTests
     [Fact]
     public void ClassifiesDecoderMessagesWithoutInventingACode()
     {
-        Assert.True(SceneryDecodeFailure.IsScrambledO3d(
-            "a.o3d: offset 0x00000004: O3D vertex data is scrambled (key 0x00000000)"));
-
         Assert.Equal(
             SceneryDiagnosticClass.UnsupportedFormat,
             SceneryDecodeFailure.Classify(
-                "a.o3d: offset 0x00000004: O3D vertex data is scrambled (key 0x00000000)"));
+                "a.o3d: offset 0x00000331: O3D bones or skinning are not supported " +
+                "by this importer."));
         Assert.Equal(
             SceneryDiagnosticClass.UnsupportedFormat,
             SceneryDecodeFailure.Classify(
@@ -163,5 +161,15 @@ public sealed class SceneryDiagnosticsTests
             SceneryDiagnosticClass.ParseError,
             SceneryDecodeFailure.Classify(
                 "a.x: offset 0x00000012: unexpected end of file while reading the vertex records."));
+
+        // A scrambled vertex section that decodes to an implausible extent is damaged
+        // content, not an unsupported format: the key and the transform are supported.
+        Assert.Equal(
+            SceneryDiagnosticClass.ParseError,
+            SceneryDecodeFailure.Classify(
+                "a.o3d: offset 0x0000000D: the vertex records decoded with key 0x00000000 " +
+                "span 12000 x 2 x 0 units, which is beyond this importer's 10000-unit " +
+                "extent limit on at least one axis. The vertex key or the vertex " +
+                "records are damaged."));
     }
 }

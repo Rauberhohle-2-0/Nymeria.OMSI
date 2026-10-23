@@ -55,7 +55,7 @@ public sealed class ScenerySummaryWriterTests
                     SceneryDiagnosticClass.UnsupportedFormat,
                     new MapDiagnostic(
                         MapDiagnosticSeverity.Warning,
-                        "unsupported: scrambled O3D",
+                        "unsupported: O3D bones",
                         "assets/a.o3d"),
                     3),
             ],
@@ -100,7 +100,7 @@ public sealed class ScenerySummaryWriterTests
             StringComparison.Ordinal);
         Assert.Contains("  [script] 42", text, StringComparison.Ordinal);
         Assert.Contains(
-            "  [unsupported format] assets/a.o3d: warning: unsupported: scrambled O3D (x3)",
+            "  [unsupported format] assets/a.o3d: warning: unsupported: O3D bones (x3)",
             text,
             StringComparison.Ordinal);
         Assert.Contains("0 re-decoded mid-run", text, StringComparison.Ordinal);

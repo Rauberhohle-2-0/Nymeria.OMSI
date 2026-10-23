@@ -739,18 +739,11 @@ internal sealed class OmsiSceneryLibrary
 
                 MeshFailures.Add(kind);
 
-                string message = exception.Message;
-
-                if (SceneryDecodeFailure.IsScrambledO3d(message))
-                {
-                    message = "unsupported: scrambled O3D — " + message;
-                }
-
                 Diagnostics.Report(
                     kind,
                     MapDiagnosticSeverity.Warning,
                     "The mesh '" + Path.GetFileName(path) +
-                    "' could not be decoded: " + message,
+                    "' could not be decoded: " + exception.Message,
                     path);
 
                 failure = kind;

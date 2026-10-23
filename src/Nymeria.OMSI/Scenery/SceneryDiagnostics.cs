@@ -26,8 +26,9 @@ internal enum SceneryDiagnosticClass
     MissingAsset,
 
     /// <summary>
-    /// The file exists and the decoder refused it: scrambled O3D vertices, an
-    /// unsupported texture encoding, or a documented size or feature limit.
+    /// The file exists and the decoder refused it: an O3D section or feature this
+    /// build does not decode, an unsupported texture encoding, or a documented size
+    /// or feature limit.
     /// </summary>
     UnsupportedFormat,
 
@@ -333,9 +334,9 @@ internal sealed class SceneryDiagnostics
 /// The engine's <c>ModelFormatException</c> and texture <c>FormatException</c> carry a
 /// message and no error code, so a decoder refusal has to be classified from the
 /// message the engine itself documents. The engine's O3D and <c>.x</c> parsers phrase a
-/// recognized-but-unsupported feature as "is not supported", a scrambled O3D vertex
-/// key as "scrambled", and a documented size limit as "exceeds the supported limit";
-/// everything else they reject is malformed input.
+/// recognized-but-unsupported feature as "is not supported" and a documented size limit
+/// as "exceeds the supported limit"; everything else they reject is malformed input,
+/// including an O3D vertex section whose decoded extent is implausible.
 /// </para>
 /// <para>
 /// The engine is pinned, so these phrases are stable for this build. If a future
@@ -346,19 +347,11 @@ internal static class SceneryDecodeFailure
 {
     private static readonly string[] UnsupportedPhrases =
     [
-        "scrambled",
         "not supported",
         "unsupported",
         "exceeds the supported limit",
         "larger than the supported limit",
     ];
-
-    /// <summary>Tests whether a decoder message reports scrambled O3D vertices.</summary>
-    /// <param name="message">The decoder message.</param>
-    internal static bool IsScrambledO3d(string message)
-    {
-        return message.Contains("scrambled", StringComparison.OrdinalIgnoreCase);
-    }
 
     /// <summary>Classifies a decoder message.</summary>
     /// <param name="message">The decoder message.</param>
