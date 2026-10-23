@@ -92,7 +92,13 @@ public sealed class ScenerySummaryWriterTests
             "placement skips: missing asset 1, unsupported format 3",
             text,
             StringComparison.Ordinal);
-        Assert.Contains("asset roots: /root; /root/Texture", text, StringComparison.Ordinal);
+        // The writer derives the installation-wide texture folder with Path.Combine,
+        // so the expectation has to as well: a hard-coded '/root/Texture' fails on
+        // Windows, where the separator is '\\'.
+        Assert.Contains(
+            "asset roots: /root; " + Path.Combine("/root", "Texture"),
+            text,
+            StringComparison.Ordinal);
         Assert.Contains(
             "unsupported definition keywords (out of scope by design): " +
             "42 occurrence(s) across 1 keyword(s)",
